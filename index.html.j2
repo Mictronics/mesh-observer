@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+
+<html lang="de">
+<head>
+    <title>Bayern Mesh - Statistik</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Bayern Mesh - Das Meshtastic Netzwerk in Bayern, empfangen in Donauwörth">
+    <meta name="keywords" content="meshtastic, netzwerk, knoten, bayern, statistik" />
+    <meta name="robots" content="index, follow, archive">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr" crossorigin="anonymous">
+    <style>
+        .anchor-link {
+            padding: 0 .175rem;
+            font-weight: 400;
+            color: #0d6efd80;
+            text-decoration: none;
+            opacity: 0;
+            transition: color .15s ease-in-out, opacity .15s ease-in-out;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .anchor-link {
+                transition: none
+            }
+        }
+        .anchor-link:after {
+            content: "#"
+        }
+        .anchor-link:focus,.anchor-link:hover,:hover>.anchor-link,:target>.anchor-link {
+            color: #0d6efd;
+            text-decoration: none;
+            opacity: 1
+        }
+    </style>
+</head>
+<body class="m-1">
+    <h1 class="display-6">Bayern Mesh</h1>
+    <p class="lead">Das Meshtastic Netzwerk in Bayern, empfangen in Donauwörth.</p>
+    <p>
+        Der Knoten <em>OP03 NFN-866#9 Mesh Observer</em> ist für die Datenerfassung zuständig.
+        <a href="https://www.mictronics.de/posts/Meshtastic-DietPi-OrangePi-Zero3/" target="_blank" class="link-secondary">Info</a>
+    </p>
+    <div class="vstack">
+        <div class="p-1">Letzte Aktualisierung: {{ last_update }}</div>
+        <div class="p-1">Aktive Knoten in 24h: {{ node_count }}</div>
+        <div class="p-1">Aktive Verbindungen in 24h: {{ link_count }}</div>
+        <div class="p-1">Messzeitraum: {{ period }} (7 Tage, gleitend)</div>
+        <div class="p-1">Packete gesamt: {{ total_packets }}</div>
+    </div>
+
+    <div class="container float-start">
+        <p><a class="icon-link" href="./visualization.html">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-share-fill" viewBox="0 0 16 16">
+            <path d="M11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.5 2.5 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5"/>
+            </svg>
+            Grafische Darstellung des Bayern Mesh
+        </a></p>
+        <img src="stats.png" class="img-fluid" alt="Verteilung der Packete pro Stunde">  
+        <p>Error 7 (CRC Fehler) ist ein Maß für die Empfangstörungen am Standort.</p>
+
+        <img src="daily.png" class="img-fluid" alt="Verteilung eindeutige Knoten über die Tageszeit im Messzeitraum">    
+        <p>Die Grafik zeigt die Verteilung eindeutiger, aktiver Knoten über die Tageszeit im gesamten Messzeitraum.
+           Die rote Linie bei 40 Knoten bezieht sich auf die eingebaute Skalierungsfunktion, die seit der Software
+           Version 2.4.0. Damit sollte der Knoten seine Aussendungen skalieren und den Intervall verlängern, falls in einem Mesh mehr als
+           40 Knoten aktiv (online) sind.
+           <a class="link-secondary" href="https://github.com/meshtastic/firmware/blob/2bcf608654facd685321779b339584644a1ecc5d/src/mesh/Default.h#L49" target="_blank">Siehe Berechnung.</a></p>
+        <h1 class="display-6">Top 10</h1>
+        <p>Die Top 10 zeigt die Knoten mit der höchsten Packetanzahl unabhängig vom Typ und in Abhängigkeit vom Packettyp an.</p>
+        <div class="row">
+            <div class="col-auto">
+                <div class="card" style="width: fit-content;">
+                    <div class="card-header">
+                        Gesamtanzahl Packete
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        {% for key, value in top10_packets.items() %}
+                            <li class="list-group-item"><a href="#{{ "%08X"|format(key[0]) }}">{{ key[1] }}</a>: {{ value }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            <div class="col-auto">
+                <div class="card" style="width: fit-content;">
+                    <div class="card-header">
+                        Packete pro Typ
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        {% for key, value in top10_types.items() %}
+                            <li class="list-group-item">{{ key[0] }} - {{ key[1] }}: {{ value }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container w-75 float-start">
+        <h1 class="display-6">Knoten Statistik</h1>
+        <p class="lead">Nur Knoten mit einer Mesh Last >0.1% sind in der Liste aufgeführt.</p>    
+        <p>Die <em>Mesh Last</em> gibt den Anteil der Packete eines Knotens von der gesamten Packetanzahl während des Messzeitraumes an.</p>
+        <p><em>Packete</em> eines Knotens während des Messzeitraumes</p>
+        <p>Die Grafik zeigt die empfangenen Aussendungen des jeweiligen Knotens über den Messzeitraum. Der Messzeitraum ist unten in der Grafik angegeben. Jeder Punkt ist eine empfangene Aussendung.</p>
+        <p> Der <a href="https://de.wikipedia.org/wiki/Median_(Stochastik)" target="_blank">Median</a> auf der rechten Seite gibt an, in welchem zeitlichen Abstand die Aussendungen empfangen wurden und lässt Rückschlüsse auf den eingestellten Intervall zu.
+        <em>N/A</em> zeigt eine ungenügende Anzahl empfangener Packete. </p>
+        <p><em>Traceroutes</em> - Leute die Software wie Meshsense oder ähnliches laufen lassen und Traceroute Aussendungen im Minutentakt erzeugen sollten sich Bewusst
+        sein, das ein Traceroute nicht bloss ein Packet erzeugt, sondern das Netzwerk über längeren Zeitraum belastet wird. Während Anfrage und Antwort Packet zirkulieren
+        werden diese immer größer da jeder Knoten, über den die Packete laufen, seine eigenen Informationen anhängt. Die Sendezeit pro Packet und damit die Kanalauslastung
+        steigt somit immer weiter an.</p>
+        <p><mark>Bitte prüft, ob ihr eure Einstellungen so verändern könnt, dass möglichst wenig sekundärer Datenverkehr entsteht.</mark></p>
+        <p><mark>Auch eine Reduzierung der Sprungweite (Hop Limit) hilft um eine ungewollte Ausbreitung von Packeten im Netzwerk zu verhindern aber trotzdem
+        eine Überwachung der Knoten zu gewährleisten.</mark></p>
+        <p><em>Warum?</em> Die Reduzierung des Datenverkehrs durch sekundäre Packete reduziert die Netzwerk Auslastung und verbessert die Weiterleitung von Text Nachrichten
+        und somit die Erreichbarkeit der Teilnehmer. Das ist die primäre Funktion des Meshtastic Netzwerkes.</p>
+        <p><a class="link-primary" href="background.html" target="_blank">Hintergrundinformationen zu Packeten und Empfehlungen</a></p>
+        {% for node in html_nodes %}
+            <div class="card mb-2">
+                <div id="{{ node.id }}" class="card-header">{{ node.long_name }}<a class="anchor-link" href="#{{ node.id }}"></a></div>
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-body-secondary">{{ node.id }}</h6>
+                    <div class="hstack gap-3">
+                        <div class="p-2">Mesh Last: {{ node.load }}%</div>
+                        <div class="p-2">Packete: {{ node.packet_count }}</div>
+                    </div>
+                </div>
+                <img src="./images/{{ node.id }}.png" class="card-img-bottom" alt="{{ node.long_name }}" style="width: min-content;">
+            </div>
+        {% endfor %}
+        <footer">&copy;2025 Mictronics</footer>
+    </div>
+</body>
+</html>

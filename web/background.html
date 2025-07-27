@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+
+<html lang="de">
+  <head>
+    <title>Bayern Mesh - Hintergrundwissen</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Bayern Mesh - Meshtastic Hintergrundwissen"
+    />
+    <meta
+      name="keywords"
+      content="meshtastic, netzwerk, knoten, bayern, wissen, informationen"
+    />
+    <meta name="robots" content="index, follow, archive" />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr"
+      crossorigin="anonymous"
+    />
+  </head>
+  <body class="m-1">
+    <div class="container float-start">
+      <h1 class="display-6">Hintergrundwissen</h1>
+      <p class="lead">Was steckt in den Standort (Position) Aussendungen?</p>
+      <ul>
+        <li>Koordinaten</li>
+        <li>Höhe</li>
+        <li>Uhrzeit</li>
+        <li>Anzahl der empfangenen Satelliten</li>
+        <li>Geschwindigkeit etc.</li>
+      </ul>
+      <p>
+        <em>Empfohlen wird, die Position nur alle 6h (21600 Sekunden) auszusenden.</em>
+      </p>
+      <p>
+        Natürlich könnt Ihr auch mal eine andere Zeit einstellen, wenn ihr
+        unterwegs seid, am Wandern oder Bergfunken. Wenn ihr aber euren Knoten
+        fix montiert habt, dann sollten 6h ausreichen um regelmäßig den Standort
+        an Kartenanbieter weiterzuleiten oder um den Standort zu überwachen. Die
+        App auf den Smartphones merkt sich auf der Karte wo sich jeder Knoten
+        befindet.
+      </p>
+      <p>
+        <mark
+          >Bitte schaltet auf jeden Fall die <em>Smart-Position</em> Funktion
+          aus.</mark
+        >
+      </p>
+      <p>
+        <img
+          src="gps_position.png"
+          class="rounded float-end img-thumbnail"
+          alt="Ungenauigkeit des GPS Standorts für einen festen Knoten"
+        />
+        Ansonsten sendet euer Knoten in unregelmäßigen Intervallen bzw. alle
+        paar Minuten seinen Standort und müllt das Netzwerk zu. Das passiert vor
+        allem (aber nicht nur), wenn euer Node die GPS Daten über euer
+        Smartphone den Standort bekommt bzw. wenn bei einem fest montiertem
+        Knoten die GPS Genauigkeit durch äussere Einflüsse schwankt. Dies
+        erzeugt ständig neue Standort Aussendungen! Das sieht dann wie in der
+        Grafik aus. Das Problem ist nicht die mangelnde Genauigkeit der
+        Position, sondern dass der Knoten unnötig ständig neue Positionen
+        sendet. Vorallem wenn er sich tatsächlich nicht bewegt.
+      </p>
+      <p>
+        Eine aktivierte <em>Smart Position</em> läst sich an der unregelmässigen Punktverteilung
+        in der grafischen Auswertung der Standortpacket eine Knoten erkennen.
+      </p>
+      <p class="lead">Was steckt in den Knoteninfo (NodeInfo) Aussendungen?</p>
+      <p>
+        <ul>
+            <li>Langer und kurzer Knotenname</li>
+            <li>Hardware Typ des Knotens (z.B. LILYGO_TBEAM, HELTEC usw.)</li>
+            <li>Rolle des Knotens (z.B. Client_Mute, Router usw.)</li>
+            <li>Öffentlicher Schlüssel des Knotens u.v.m.</li>
+        </ul>
+      </p>
+      <p><em>Die Standard Einstellung ist 3h (10800 Sekunden).</em></p>
+      <p>
+        Die Smartphones merken sich in der Knotenliste diese Information für jeden einzelen Knoten. Es ist darum nicht nötig
+        weniger als 3h in den Settings einzustellen.
+      </p>
+      <p>
+        <mark>Das Knoteninfo Packet ist mit das Größte in der Datenmenge, benötigt eine sehr lange Übertragungszeit und sorgt damit für eine höhere Kanalauslastung.</mark>
+      </p>
+      <p class="lead">Was steckt in den Gerätetelemetrie Aussendungen?</p>
+      <p>
+        <ul>
+            <li>Akkuspannung</li>
+            <li>Kanalauslastung</li>
+            <li>Sendezeitauslastung</li>
+            <li>Knotenbetriebszeit u.v.m.</li>
+        </ul>
+        Diese Information kann interessant sein, wenn ihr einen entfernten Knoten (z.B. irgendwo auf dem Berg) betreibt
+        und den Zustand überwachen wollt.<br>
+        Steht aber der Knoten bei euch zuhause auf dem Fensterbrett, liegt im Auto, oder er steckt in eurer Tasche,
+        dann ist es recht sinnfrei diese Information ständig ins Netz zu senden. Ihr seht ja z.B. den Akkustand
+        mittels Bluetooth oder WLAN auf eurem Smartphone. Wahrscheinlich interessieren sich die 200 anderen Knoten im Netzwerk 
+        nicht so sehr für den Ladezustand jedes einzelnen Knoten...
+      </p>
+      <p>
+        <em>Als Empfehlung ist in einem solchen Fall der Intervall für die Gerätetelemetrie auf das Maximum einzustellen:
+        72h (= 259200 Sekunden)</em>
+      </p>
+      <p class="lead">Was steckt in den Umwelttelemtrie Aussendungen?</p>
+      <p>
+        <ul>
+            <li>Temperatur</li>
+            <li>Luftdruck</li>
+            <li>Luftfeuchte</li>
+            <li>Luftqualität</li>
+            <li>u.v.m. in Abhängikeit von den angeschlossenen Sensortypen.</li>
+        </ul>
+        Das kann spannend sein, falls richtig gemacht und nicht ständig ausgesandt.
+        Wenn man aber einen Temperatursensor verbaut so würde ich vorschlagen man befasst sich etwas damit wie
+        in der Wetterkunde die Temperatur richtig gemessen wird.
+        Zu wissen, dass es in in eurem Knoten, oben auf dem Dach, in praller Sonne im Sommer 56 Grad hat,
+        halte ich für sinnbefreit (jedenfalls für die anderen 200 Knoten, die diese Information über das Netzwerk im 15 Minuten Intervall erhalten...).
+      </p>
+      <p>
+        <em>Stellt den Intervall für die Umwelttelemtrie auf einen Wert der verhältnismässig zum Anwendungsfall ist aber trotzdem eine sinnvolle Auswertung
+            oder Überwachung der Daten gewährleistet. 6h (21600 Sekunden) sind ausreichend um einen entfernten Knoten zuverlässig zu Überwachen.</em>
+      </p>
+      <p class="lead">Einstellung der Sprungweite (Hop Limit)</p>
+      <p>
+        Es kann je nach Anwendungsfall des Knotens sinnvoll sein die Sprungweite (Hop Limit) seiner Aussendungen zu reduzieren um eine unnötige Ausbreitung
+        der Packete im Netzwerk zu vermeiden.<br>
+        z.B. Kann die Sprungweite für einen Wettersensor im Garten auf 1 oder sogar 0 gesetzt werden wenn die Umwelttelemtrie nur bis ins Haus/Wohnung übertragen
+        werden soll. Damit ist eine direkte Verbindung zwischen den Knoten garantiert aber das restliche Netzwerk wird nicht mit diesen Nachrichten belastet.<br>
+        Vorallem wenn der Intervall sehr kurz ist (kleiner 1 Stunde).
+      </p>
+      <p class="lead">Vielen Dank an das Schweizer Meshtastic Team, besonders Matthias aka <em>Mesh Traffic Observer</em> für die Ideen und Texte.</p>
+      <footer>&copy;2025 Mictronics</footer>
+    </div>
+  </body>
+</html>

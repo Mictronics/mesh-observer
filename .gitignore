@@ -1,0 +1,13 @@
+__pycache__/*
+.venv/*
+.vscode/*
+__init__.py
+seaborn_test.py
+gini.py
+ftp_credentials.py
+*.code-workspace
+network.sqlite3
+*.png
+*.html
+!background.html
+!gps_position.png

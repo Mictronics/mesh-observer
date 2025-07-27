@@ -1,0 +1,17 @@
+[Unit]
+Description=Meshtastic mesh observer
+After=network-online.target
+StartLimitInterval=200
+StartLimitBurst=5
+
+[Service]
+User=meshtasticd
+Group=meshtasticd
+Type=simple
+WorkingDirectory=/opt/meshtastic_observer
+ExecStart=/opt/meshtastic_observer/.venv/bin/python3 /opt/meshtastic_observer/meshtastic_observer.py
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
