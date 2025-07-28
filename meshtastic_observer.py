@@ -225,6 +225,23 @@ def statistics(hourly = False):
         hourly_plot.axhline(y = 40).set_color("red")
         plt.savefig(os.getcwd() + "/web/daily.png", dpi=100, bbox_inches="tight")
         plt.close()
+        # Create number of packets distribution over days per week graph
+        weekly_packets = packets.groupby([packets['time'].dt.day]).type.count()
+        weekly_plot = sns.barplot(
+            data = weekly_packets,
+            color = "limegreen",
+            estimator="sum",
+            errorbar=None,
+            orient='v',
+        )
+        weekly_plot.set_xlabel("Tag")
+        weekly_plot.set_ylabel("Packete")
+        weekly_plot.set(title="Messzeitraum: " + period)
+        weekly_plot.figure.suptitle("Anzahl der Packete pro Tag im Messzeitraum")
+        for cont in weekly_plot.containers:
+            weekly_plot.bar_label(cont, fontsize=8);
+        plt.savefig(os.getcwd() + "/web/weekly.png", dpi=100, bbox_inches="tight")
+        plt.close()
         # Create packet statistics graph for each node
         for node, node_packets in packets.groupby(["source", "longname"]):
             node_id = node[0]
