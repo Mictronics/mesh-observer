@@ -27,17 +27,13 @@ import re
 import datetime
 import time
 import threading
+# trunk-ignore(bandit/B402)
 import ftplib
 import math
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import seaborn as sns
-import math
-import datetime
-import sqlite3
-import sys
-import os
 import ftp_credentials
 
 from jinja2 import Environment, FileSystemLoader
@@ -104,13 +100,13 @@ def ftp_upload(hourly = False):
     if hourly:
         filename = ftp_credentials.__local_folder__ + "/stats.png"
         with open(filename, "rb") as file:
-            ftp_server.storbinary(f"STOR stats.png", file)
+            ftp_server.storbinary("STOR stats.png", file)
         ftp_server.quit()
         print("Upload hourly...")
         return
 
     # Upload entire web folder including sub-folders
-    for root, dirs, files in os.walk(ftp_credentials.__local_folder__):
+    for root, _dirs, files in os.walk(ftp_credentials.__local_folder__):
         rel_path = os.path.relpath(root, ftp_credentials.__local_folder__)
         ftp_path = os.path.join(ftp_credentials.__remote_folder__, rel_path).replace("\\", "/")
 
@@ -247,7 +243,7 @@ def statistics(hourly = False):
         weekly_plot.set(title="Messzeitraum: " + period)
         weekly_plot.figure.suptitle("Anzahl der Packete pro Tag im Messzeitraum")
         for cont in weekly_plot.containers:
-            weekly_plot.bar_label(cont, fontsize=8);
+            weekly_plot.bar_label(cont, fontsize=8)
         plt.savefig(os.getcwd() + "/web/weekly.png", dpi=100, bbox_inches="tight")
         plt.close()
         # Create packet statistics graph for each node
@@ -302,7 +298,7 @@ def statistics(hourly = False):
             plt.close()
 
         # Generate statistical web content
-        jinja_env = Environment(loader=FileSystemLoader("index.html.j2"))
+        jinja_env = Environment(loader=FileSystemLoader("index.html.j2"), autoescape=True)
         index_template = jinja_env.get_template('')
         html = index_template.render(
             html_nodes = html_nodes,
@@ -364,7 +360,7 @@ def graph(all=False):
                 sources.append(f'{src:08X}')
                 destinations.append(f'{dst:08X}')
                 if snr <= -500:
-                    edge_labels.append(f"? dB")
+                    edge_labels.append("? dB")
                 else:
                     edge_labels.append(f"{snr:0.2f} dB")
             cur.close()
