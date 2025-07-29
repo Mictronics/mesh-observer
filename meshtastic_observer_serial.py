@@ -35,6 +35,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import seaborn as sns
 import ftp_credentials
+import schedule
 
 from jinja2 import Environment, FileSystemLoader
 from globals import Globals
@@ -102,7 +103,6 @@ def ftp_upload(hourly = False):
         with open(filename, "rb") as file:
             ftp_server.storbinary("STOR stats.png", file)
         ftp_server.quit()
-        print("Upload hourly...")
         return
 
     # Upload entire web folder including sub-folders
@@ -325,7 +325,7 @@ def statistics(hourly = False):
     finally:
         if database is not None:
             database.close()
-        print("Statistics: ", hourly)
+        #print("Statistics: ", hourly)
     
 
 def graph(all=False):
@@ -613,19 +613,25 @@ def serialLogger(dev):
 
 def hourlyRunner():
     """Thread running every hour"""
-    while True:
-        statistics(hourly = True)
-        ftp_upload(hourly = True)
-        time.sleep(3300) # Avoid both runners at the same time  
+    statistics(hourly = True)
+    ftp_upload(hourly = True)
 
 
 def dailyRunner():
     """Thread running ones per day"""
+    graph()
+    statistics(hourly = False)
+    ftp_upload(hourly = False)
+
+
+def scheduleRunner():
+    """Thread running every 1 seconds"""
+    schedule.every().hour.do(hourlyRunner)
+    schedule.every().day.at("11:52:00", "Europe/Berlin").do(dailyRunner)
+    schedule.every().day.at("23:52:00", "Europe/Berlin").do(dailyRunner)
     while True:
-        graph()
-        statistics(hourly = False)
-        ftp_upload(hourly = False)
-        time.sleep(86400)        
+        schedule.run_pending()
+        time.sleep(1) # Avoid busy loop
 
 
 def main():
@@ -665,9 +671,8 @@ def main():
     # The threads we are running
     t = threading.Thread(target=serialLogger, args=(args.dev,), name="SerialLogger")
     threads.append(t)
-    t = threading.Thread(target=hourlyRunner, name="Hourly Runner", daemon=True)
-    threads.append(t)
-    t = threading.Thread(target=dailyRunner, name="Daily Runner", daemon=True)
+    t = threading.Thread(target=scheduleRunner, name="Scheduler")
+    t.daemon = True  # Daemon thread will exit when the main program exits
     threads.append(t)
 
     # Start each thread
