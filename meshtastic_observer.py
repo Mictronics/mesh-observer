@@ -130,7 +130,6 @@ def ftp_upload(hourly = False):
                 ftp_server.storbinary(f'STOR {remote_file}', f)
 
     ftp_server.quit()
-    #print("Upload...")
 
 
 def statistics(hourly = False):
@@ -341,13 +340,11 @@ def statistics(hourly = False):
             f.write(html)
 
     except Exception as e:
-        print("Creating network statistics failed.")
-        print(f"Error was: {e}")
+        journal.send(f"Creating network statistics failed. Error: {e}", PRIORITY=journal.LOG_ERROR, _SYSTEMD_UNIT="meshtastic_observer.service")
 
     finally:
         if database is not None:
             database.close()
-        #print("Statistics: ", hourly)
     
 
 def graph(all=False):
@@ -415,13 +412,11 @@ def graph(all=False):
             save_button=False)
     
     except Exception as e:
-        print("Creating network graph failed.")
-        print(f"Error was: {e}")
+        journal.send(f"Creating network graph failed. Error: {e}", PRIORITY=journal.LOG_ERROR, _SYSTEMD_UNIT="meshtastic_observer.service")
 
     finally:
         if database is not None:
             database.close()
-        #print("Graph...")
 
 
 def journalLogger():
@@ -450,8 +445,7 @@ def journalLogger():
     try:
         database = sqlite3.connect("network.sqlite3", isolation_level='DEFERRED')
     except Exception as e:
-        print("Connecting database failed.")
-        print(f"Error was: {e}")
+        journal.send(f"Connection to database failed. Error: {e}", PRIORITY=journal.LOG_ERROR, _SYSTEMD_UNIT="meshtastic_observer.service")
         sys.exit(1)
 
     # Connect to system journal that provides the Meshtasticd debug log
@@ -508,7 +502,7 @@ def journalLogger():
                             is_telemetry_packet = False
                             continue
                         if type not in port_numbers.keys():
-                            print(telemetry_from_id, type)
+                            journal.send(f"Unknown port number: {telemetry_from_id} > {type}", PRIORITY=journal.LOG_WARN, _SYSTEMD_UNIT="meshtastic_observer.service")
                         else:
                             num = port_numbers[type]
                             if num != 67:
@@ -600,7 +594,6 @@ def journalLogger():
                         cur.executemany("INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, 0) ON CONFLICT(id) DO UPDATE SET shortname=:shortname, longname=:longname, seen=strftime('%s','now')", data)
                         database.commit()
                         cur.close()
-                    #print(long_name)
                     continue
 
                 # Store received nodes position
@@ -618,7 +611,6 @@ def journalLogger():
                         cur.executemany("UPDATE OR IGNORE nodes SET seen = strftime('%s','now'), latitude = :lat, longitude = :lon WHERE id = :id;", data)
                         database.commit()
                         cur.close()
-                    #print(id, lat, lon)
                     continue
 
                 # Count error -7 (CRC mismatch) for reception quality statistics
@@ -659,7 +651,6 @@ def journalLogger():
                                     cur.executemany("UPDATE OR IGNORE nodes SET tracestart = tracestart + 1 where id = :id;", ({"id":source},))
                                 database.commit()
                                 cur.close()
-                    #print("> > >")
                     continue
             # end if entry['MESSAGE]
         # end for entry
