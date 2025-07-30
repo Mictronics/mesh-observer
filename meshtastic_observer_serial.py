@@ -162,9 +162,10 @@ def statistics(hourly = False):
             statistics['Routing'] = math.ceil((module_count['routing'] / diff_sec) * 60 * 60)
             statistics['Position'] = math.ceil((module_count['position'] / diff_sec) * 60 * 60)
             statistics['NodeInfo'] = math.ceil((module_count['nodeinfo'] / diff_sec) * 60 * 60)
-            statistics['Text'] = math.ceil((module_count['text'] / diff_sec) * 60 * 60)
+            statistics['Text'] = math.ceil((module_count['text msg'] / diff_sec) * 60 * 60)
             statistics['Error7'] = math.ceil((module_count['error7'] / diff_sec) * 60 * 60)
             statistics['External Notification'] = math.ceil((module_count['ExternalNotificationModule'] / diff_sec) * 60 * 60)
+            statistics['Air Quality'] = math.ceil((module_count['AirQuality'] / diff_sec) * 60 * 60)
 
             stats_plot = sns.barplot(
                 data = statistics,
@@ -408,39 +409,17 @@ def serialLogger(dev):
     port_numbers = {
         "unknown": 0,
         "text msg": 1,
-        "RemoteHardware": 2,
+        "remotehardware": 2,
         "position": 3,
         "nodeinfo": 4,
         "routing":5,
         "admin": 6,
-#    7	TEXT_MESSAGE_COMPRESSED
-#    8	WAYPOINT
-#    9	AUDIO
-#    10	DETECTION_SENSOR
-#    11	ALERT
-#    12	KEY_VERIFICATION
-#    32	REPLY
-#    33	IP_TUNNEL
-#    34	PAXCOUNTER
-#    64	SERIAL
-#    65	STORE_FORWARD
-#    66	RANGE_TEST
         "telemetry": 67,
-#    68	ZPS
-#    69	SIMULATOR
+        "devicetelemetry": 67,
+        "powertelemetry": 67,
+        "environmenttelemetry": 67,
+        "hostmetrics": 67,
         "traceroute": 70,
-#    71	NEIGHBORINFO
-#    72	ATAK_PLUGIN
-#    73	MAP_REPORT
-#    74	POWERSTRESS
-#    76	RETICULUM_TUNNEL
-#    77	CAYENNE
-#    256	PRIVATE
-#    257	ATAK_FORWARDER
-        "devicetelemetry": 512,
-        "powertelemetry": 513,
-        "environmenttelemetry": 514,
-        "hostmetrics": 515,
     }
 
     _globals = Globals.getInstance()
@@ -475,38 +454,88 @@ def serialLogger(dev):
     regex_traceroute = r"([0-9abcdef]{8})[ ]?(\(([0-9.-]{0,6})dB\))?"
     regex_node_info = r"user[\s]([\w\W\s]*?), id=0x([0-9abcdef]{8})"
     regex_position = r"POSITION node=(?P<id>[0-9abcdef]{8}).*lat=(?P<lat>[0-9]+).*lon=(?P<lon>[0-9]+)"
-    regex_module = r"Module '(?P<module>[A-Za-z]+)' wantsPacket=1"
     regex_packet_rx = r"Received (?P<type>[A-Za-z ]+) from=(?P<from>[0-9abcdefx]+)[ ,a-z=]+[0-9abcdefx]+[ ,a-z=]+(?P<port_num>[0-9abcdefx]+)"
 
     # Keep track of each received packet type (named module in debug log)
     module_count = _globals.getModuleCount()
     module_count['startlog'] = datetime.datetime.now()
+    is_telemetry_packet = False
+    telemetry_from_id = 0
 
     # Parse the Meshtastic debug log
     while interface.is_open:
         line = interface.readline().decode("ascii")
-
         # Store any packet received with source ID, type and timestamp.
         # Used in a nodes packet statistics graph.
         rx_packet = re.search(regex_packet_rx, line)
         if rx_packet is not None:
-            type = rx_packet.group("type").lower()
+            type = rx_packet.group("type").lower() # This is why key in port_numbers must be lower case
             if type != "routing":
-                id = int(rx_packet.group("from"), 16)
+                telemetry_from_id = int(rx_packet.group("from"), 16)
                 # Ignore broadcast or unknown ID
-                if id == 0xFFFFFFFF or id == 0:
+                if telemetry_from_id == 0xFFFFFFFF or telemetry_from_id == 0:
+                    is_telemetry_packet = False
                     continue
                 if type not in port_numbers.keys():
-                    print(id, type)
+                    print(telemetry_from_id, type)
                 else:
                     num = port_numbers[type]
-                    with lock:
-                        cur = database.cursor()                
-                        data = [{"id": id, "type": num},]
-                        cur.executemany("INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'))", data)
-                        database.commit()
-                        cur.close()
-                continue            
+                    if num != 67:
+                        # Handle everything except telemetry packets
+                        module_count[type] += 1
+                        with lock:
+                            cur = database.cursor()
+                            data = [{"id": telemetry_from_id, "type": num},]
+                            cur.executemany("INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'))", data)
+                            database.commit()
+                            cur.close()
+                    else:
+                        is_telemetry_packet = True # Indicate telemetry packet
+                        # We need one more line to check which type of telemetry packet it is
+                        continue
+            else:
+                # Count routing packets
+                module_count['routing'] += 1
+            # Save what we counted
+            with lock:
+                _globals.setModuleCount(module_count)
+
+            continue
+
+        # Handle different telemetry packets with port number 67
+        if is_telemetry_packet:
+            data = None
+            if "air_util_tx" in line:
+                module_count['DeviceTelemetry'] += 1
+                data = [{"id": telemetry_from_id, "type": 512},]
+            elif "ch1_voltage" in line:
+                module_count['PowerTelemetry'] += 1
+                data = [{"id": telemetry_from_id, "type": 513},]
+            elif "barometric_pressure" in line:
+                module_count['EnvironmentTelemetry'] += 1
+                data = [{"id": telemetry_from_id, "type": 514},]
+            elif "diskfree" in line:
+                module_count['HostMetrics'] += 1
+                data = [{"id": telemetry_from_id, "type": 515},]
+            elif "pm10_standard" in line:
+                module_count['AirQuality'] += 1
+                data = [{"id": telemetry_from_id, "type": 516},]
+            elif "heart_bpm" in line:
+                module_count['HealthTelemetry'] += 1
+                data = [{"id": telemetry_from_id, "type": 517},]
+
+            if data is not None:
+                # Store telemetry packet in database
+                with lock:
+                    _globals.setModuleCount(module_count)
+                    cur = database.cursor()
+                    cur.executemany("INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'))", data)
+                    database.commit()
+                    cur.close()
+
+            is_telemetry_packet = False
+            telemetry_from_id = 0
+            continue
 
         # Store names and ID from received node information
         # Used in mesh visualization.
@@ -551,19 +580,6 @@ def serialLogger(dev):
                 database.commit()
                 cur.close()
             #print(id, lat, lon)
-            continue
-
-        # Count all received packet types (modules) for hourly statistics
-        module = re.search(regex_module, line)
-        if module is not None:
-            m = module.group(1)
-            if m in module_count.keys():
-                module_count[m] += 1
-            else:
-                print(f"Unknown module: {m}")
-
-            with lock:
-                _globals.setModuleCount(module_count)
             continue
 
         # Count error -7 (CRC mismatch) for reception quality statistics
