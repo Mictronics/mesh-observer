@@ -53,6 +53,8 @@ class Globals:
             'text msg': 0,
             'startlog': None,
             'error7': 0,
+            'decoded': 0,
+            'encrypted': 0,
         }
 
     def reset(self):
@@ -77,6 +79,8 @@ class Globals:
             'text msg': 0,
             'startlog': None,
             'error7': 0,
+            'decoded': 0,
+            'encrypted': 0,
         }
 
     # setters

@@ -102,6 +102,9 @@ def ftp_upload(hourly = False):
         filename = ftp_credentials.__local_folder__ + "/stats.png"
         with open(filename, "rb") as file:
             ftp_server.storbinary("STOR stats.png", file)
+        filename = ftp_credentials.__local_folder__ + "/decoding.png"
+        with open(filename, "rb") as file:
+            ftp_server.storbinary("STOR decoding.png", file)
         ftp_server.quit()
         return
 
@@ -185,6 +188,28 @@ def statistics(hourly = False):
             plt.savefig(os.getcwd() + "/web/stats.png", dpi=100, bbox_inches="tight")
             plt.close()
 
+            # Create decoding statistics graph
+            decoding = {}
+            decoding["Entschlüsselt"] = module_count.get("decoded", 0)
+            decoding["Verschlüsselt"] = module_count.get("encrypted", 0)
+            decoding_plot = sns.barplot(
+                data = decoding,
+                color = "limegreen",
+                orient= 'h',
+            )
+            df = pd.DataFrame(decoding.items())
+            sum = df[1].sum()
+            if sum == 0: # Prevent division by zero
+                sum = 1
+            for index, row in df.iterrows():
+                plt.text(row[1], index, f"{row[1]} / {(row[1] / sum) * 100:.1f}%", color='black', va="center")
+            decoding_plot.set_xlabel("Packete")
+            decoding_plot.set_ylabel("Status")
+            decoding_plot.set(title="Messzeit: " + now_str)
+            decoding_plot.figure.suptitle("Anteil privater Packete im Messzeitraum")
+            plt.savefig(os.getcwd() + "/web/decoding.png", dpi=100, bbox_inches="tight")
+            plt.close()
+
         if hourly:
             # Do nothing else when called hourly
             return
@@ -247,6 +272,7 @@ def statistics(hourly = False):
             weekly_plot.bar_label(cont, fontsize=8)
         plt.savefig(os.getcwd() + "/web/weekly.png", dpi=100, bbox_inches="tight")
         plt.close()
+
         # Create packet statistics graph for each node
         for node, node_packets in packets.groupby(["source", "longname"]):
             node_id = node[0]
@@ -455,6 +481,7 @@ def serialLogger(dev):
     regex_node_info = r"user[\s]([\w\W\s]*?), id=0x([0-9abcdef]{8})"
     regex_position = r"POSITION node=(?P<id>[0-9abcdef]{8}).*lat=(?P<lat>[0-9]+).*lon=(?P<lon>[0-9]+)"
     regex_packet_rx = r"Received (?P<type>[A-Za-z ]+) from=(?P<from>[0-9abcdefx]+)[ ,a-z=]+[0-9abcdefx]+[ ,a-z=]+(?P<port_num>[0-9abcdefx]+)"
+    regex_decoding = r"(?P<decoding>decoded message|no PSK)"
 
     # Keep track of each received packet type (named module in debug log)
     module_count = _globals.getModuleCount()
@@ -535,6 +562,17 @@ def serialLogger(dev):
 
             is_telemetry_packet = False
             telemetry_from_id = 0
+            continue
+
+        # Handle decoding messages
+        decoding = re.search(regex_decoding, line)
+        if decoding is not None:
+            if decoding.group("decoding") == "decoded message":
+                module_count['decoded'] += 1
+            elif decoding.group("decoding") == "no PSK":
+                module_count['encrypted'] += 1
+            with lock:
+                _globals.setModuleCount(module_count)
             continue
 
         # Store names and ID from received node information
