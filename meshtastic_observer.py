@@ -163,6 +163,7 @@ def statistics(hourly = False):
             statistics['Error7'] = math.ceil((module_count['error7'] / diff_sec) * 60 * 60)
             statistics['External Notification'] = math.ceil((module_count['ExternalNotificationModule'] / diff_sec) * 60 * 60)
             statistics['Air Quality'] = math.ceil((module_count['AirQuality'] / diff_sec) * 60 * 60)
+            statistics['Admin'] = math.ceil((module_count['admin'] / diff_sec) * 60 * 60)
 
             stats_plot = sns.barplot(
                 data = statistics,
