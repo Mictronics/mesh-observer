@@ -9,6 +9,9 @@ The monitoring is purely passive by line parsing the nodes debug log. No Meshtas
 Run the following commands for repository cloning, creation of a Python virtual environment and installation of dependencies.
 
 ```bash
+# Install dependencies
+sudo apt install libsystemd-journal-dev
+
 # Clone repository
 git clone https://github.com/Mictronics/mesh-observer.git
 
