@@ -156,7 +156,7 @@ def statistics(hourly = False):
             statistics['Store Forward'] = math.ceil((module_count['StoreForward'] / diff_sec) * 60 * 60)
             statistics['Power Telemetry'] = math.ceil((module_count['PowerTelemetry'] / diff_sec) * 60 * 60)
             statistics['Traceroute'] = math.ceil((module_count['traceroute'] / diff_sec) * 60 * 60)
-            statistics['Routing'] = math.ceil((module_count['routing'] / diff_sec) * 60 * 60)
+            #statistics['Routing'] = math.ceil((module_count['routing'] / diff_sec) * 60 * 60)
             statistics['Position'] = math.ceil((module_count['position'] / diff_sec) * 60 * 60)
             statistics['NodeInfo'] = math.ceil((module_count['nodeinfo'] / diff_sec) * 60 * 60)
             statistics['Text'] = math.ceil((module_count['text msg'] / diff_sec) * 60 * 60)
@@ -524,12 +524,9 @@ def journalLogger():
                                 is_telemetry_packet = True # Indicate telemetry packet
                                 # We need one more line to check which type of telemetry packet it is
                                 continue
-                    else:
-                        # Count routing packets
-                        module_count['routing'] += 1
-                    # Save what we counted
-                    with lock:
-                        _globals.setModuleCount(module_count)
+                        # Save what we counted
+                        with lock:
+                            _globals.setModuleCount(module_count)
 
                     continue
 
