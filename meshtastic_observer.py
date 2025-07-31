@@ -201,6 +201,7 @@ def statistics(hourly = False):
             decoding_plot.set_ylabel("Status")
             decoding_plot.set(title="Messzeit: " + now_str)
             decoding_plot.figure.suptitle("Anteil privater Packete im Messzeitraum")
+            decoding_plot.figure.set_size_inches(8, 4)
             plt.savefig(os.getcwd() + "/web/decoding.png", dpi=100, bbox_inches="tight")
             plt.close()
 
@@ -664,7 +665,6 @@ def hourlyRunner():
     """Thread running every hour"""
     statistics(hourly = True)
     ftp_upload(hourly = True)
-    journal.send("hourlyRunner finished", PRIORITY=journal.LOG_INFO, _SYSTEMD_UNIT="meshtastic_observer.service")
 
 
 def dailyRunner():
@@ -672,7 +672,6 @@ def dailyRunner():
     graph()
     statistics(hourly = False)
     ftp_upload(hourly = False)
-    journal.send("dailyRunner finished", PRIORITY=journal.LOG_INFO, _SYSTEMD_UNIT="meshtastic_observer.service")
 
 
 def scheduleRunner():
