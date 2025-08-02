@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS "nodes" (
 	"latitude"	REAL,
 	"longitude"	REAL,
 	"tracestart"	INTEGER DEFAULT 0,
+	"role"	INTEGER DEFAULT 0,
+	"hardware"	INTEGER DEFAULT 0,
 	PRIMARY KEY("id")
 );
 CREATE TABLE IF NOT EXISTS "packet_types" (
@@ -64,7 +66,7 @@ INSERT OR REPLACE INTO "packet_types" VALUES (515,'Host Metrics');
 INSERT OR REPLACE INTO "packet_types" VALUES (516,'Air Quality');
 INSERT OR REPLACE INTO "packet_types" VALUES (517,'Health Telemetry');
 CREATE VIEW ViewPackets AS
-SELECT source, longname, type, port_name, time FROM packets AS p
+SELECT source, longname, type, port_name, time, role FROM packets AS p
 INNER JOIN packet_types ON packet_types.port_num = p.type
 INNER JOIN nodes ON nodes.id = p.source;
 CREATE TRIGGER delete_old_links
