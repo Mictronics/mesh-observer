@@ -196,7 +196,8 @@ def statistics(hourly = False):
             decoding_plot = sns.barplot(
                 data = decoding,
                 color = "limegreen",
-                orient= 'h',
+                orient = 'h',
+                width = 0.4,
             )
             df = pd.DataFrame(decoding.items())
             sum = df[1].sum()
@@ -208,7 +209,7 @@ def statistics(hourly = False):
             decoding_plot.set_ylabel("Status")
             decoding_plot.set(title="Messzeit: " + now_str)
             decoding_plot.figure.suptitle("Anteil privater Packete im Messzeitraum")
-            decoding_plot.figure.set_size_inches(8, 2)
+            decoding_plot.figure.set_size_inches(8, 4)
             plt.savefig(os.getcwd() + "/web/decoding.png", dpi=100, bbox_inches="tight")
             plt.close()
 
