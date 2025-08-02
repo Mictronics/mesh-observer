@@ -321,6 +321,7 @@ def statistics(hourly = False):
             plt.close()
 
         # Generate statistical web content
+        html_nodes.sort(key=lambda x: x["load"], reverse=True)
         jinja_env = Environment(loader=FileSystemLoader("index.html.j2"), autoescape=True)
         index_template = jinja_env.get_template('')
         html = index_template.render(
