@@ -11,3 +11,4 @@ network.sqlite3
 *.html
 !background.html
 !gps_position.png
+!apple-touch-icon.png
