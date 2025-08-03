@@ -343,7 +343,7 @@ def statistics(hourly = False):
             f.write(html)
 
     except Exception as e:
-        journal.send(f"Creating network statistics failed. Error: {e}", PRIORITY=journal.LOG_ERROR, _SYSTEMD_UNIT="meshtastic_observer.service")
+        journal.send(f"Creating network statistics failed. Error: {e}", PRIORITY=journal.LOG_ERR, _SYSTEMD_UNIT="meshtastic_observer.service")
 
     finally:
         if database is not None:
@@ -415,7 +415,7 @@ def graph(all=False):
             save_button=False)
     
     except Exception as e:
-        journal.send(f"Creating network graph failed. Error: {e}", PRIORITY=journal.LOG_ERROR, _SYSTEMD_UNIT="meshtastic_observer.service")
+        journal.send(f"Creating network graph failed. Error: {e}", PRIORITY=journal.LOG_ERR, _SYSTEMD_UNIT="meshtastic_observer.service")
 
     finally:
         if database is not None:
@@ -449,7 +449,7 @@ def journalLogger():
     try:
         database = sqlite3.connect("network.sqlite3", isolation_level='DEFERRED')
     except Exception as e:
-        journal.send(f"Connection to database failed. Error: {e}", PRIORITY=journal.LOG_ERROR, _SYSTEMD_UNIT="meshtastic_observer.service")
+        journal.send(f"Connection to database failed. Error: {e}", PRIORITY=journal.LOG_ERR, _SYSTEMD_UNIT="meshtastic_observer.service")
         sys.exit(1)
 
     # Connect to system journal that provides the Meshtasticd debug log
