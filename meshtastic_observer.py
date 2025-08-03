@@ -539,7 +539,7 @@ def journalLogger():
                                 with lock:
                                     cur = database.cursor()
                                     data = [{"id": telemetry_from_id, "type": num},]
-                                    cur.executemany("INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'))", data)
+                                    cur.executemany("INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));", data)
                                     database.commit()
                                     cur.close()
                             else:
@@ -579,7 +579,7 @@ def journalLogger():
                         with lock:
                             _globals.setModuleCount(module_count)
                             cur = database.cursor()
-                            cur.executemany("INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'))", data)
+                            cur.executemany("INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));", data)
                             database.commit()
                             cur.close()
 
@@ -619,7 +619,7 @@ def journalLogger():
                     with lock:
                         cur = database.cursor()                
                         data = [{"id": id, "shortname": short_name, "longname": long_name},]
-                        cur.executemany("INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, 0) ON CONFLICT(id) DO UPDATE SET shortname=:shortname, longname=:longname, seen=strftime('%s','now')", data)
+                        cur.executemany("INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET shortname=:shortname, longname=:longname, seen=strftime('%s','now');", data)
                         database.commit()
                         cur.close()
                     continue
