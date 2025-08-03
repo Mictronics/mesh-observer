@@ -159,7 +159,7 @@ def statistics(hourly = False):
             statistics['Position'] = math.ceil((module_count['position'] / diff_sec) * 60 * 60)
             statistics['NodeInfo'] = math.ceil((module_count['nodeinfo'] / diff_sec) * 60 * 60)
             statistics['Text'] = math.ceil((module_count['text msg'] / diff_sec) * 60 * 60)
-            statistics['Error7'] = math.ceil((module_count['error7'] / diff_sec) * 60 * 60)
+            statistics['Waypoint'] = math.ceil((module_count['waypoint msg'] / diff_sec) * 60 * 60)
             statistics['External Notification'] = math.ceil((module_count['ExternalNotificationModule'] / diff_sec) * 60 * 60)
             statistics['Air Quality'] = math.ceil((module_count['AirQuality'] / diff_sec) * 60 * 60)
             statistics['Admin'] = math.ceil((module_count['admin'] / diff_sec) * 60 * 60)
@@ -433,6 +433,7 @@ def journalLogger():
         "nodeinfo": 4,
         "routing":5,
         "admin": 6,
+        "waypoint msg": 8,
         "telemetry": 67,
         "devicetelemetry": 67,
         "powertelemetry": 67,
