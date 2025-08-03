@@ -1,0 +1,26 @@
+{
+  "name": "Bayern Mesh",
+  "short_name": "Bayern Mesh",
+  "start_url": ".",
+  "description": "Das Meshtastic Netzwerk in Bayern, empfangen in Donauwörth.",
+  "icons": [
+    {
+      "src": "./logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#67ea94",
+  "background_color": "#67ea94",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "de-DE",
+  "categories": ["communication"],
+  "id": "/bayern-mesh/"
+}
