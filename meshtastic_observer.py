@@ -145,6 +145,21 @@ def statistics(hourly = False):
     dt = datetime.datetime.now()
     now_str = dt.strftime('%d.%m.%Y %H:%M') # Web content update time
 
+    roles = [
+        "Client",
+        "Client Mute",
+        "Router",
+        "Router Client",
+        "Repeater",
+        "Tracker",
+        "Sensor",
+        "TAK",
+        "Client Hidden",
+        "Lost and Found",
+        "TAK Tracker",
+        "Router Late",
+    ]
+
     try:
         # Create packets/24h statistics
         if module_count['startlog'] is not None:
@@ -275,6 +290,11 @@ def statistics(hourly = False):
         for node, node_packets in packets.groupby(["source", "longname"]):
             node_id = node[0]
             long_name = node[1]
+            role_int = node_packets["role"].unique()[0]
+            if role_int < len(roles):
+                role = roles[role_int]
+            else:
+                role = "Unbekannte Rolle"
             packet_count = node_packets.shape[0]
             load = 100 * (packet_count / total_packets)
             # Skip nodes with mesh load less than 0.1%
@@ -286,6 +306,7 @@ def statistics(hourly = False):
                 long_name = long_name,
                 packet_count = packet_count,
                 load = round(load, 3),
+                role = role,
             ))
             # Create single node statistics graph
             node_plot = sns.catplot(
@@ -481,6 +502,7 @@ def journalLogger():
     regex_position = r"POSITION node=(?P<id>[0-9abcdef]{8}).*lat=(?P<lat>[0-9]+).*lon=(?P<lon>[0-9]+)"
     regex_packet_rx = r"Received (?P<type>[A-Za-z ]+) from=(?P<from>[0-9abcdefx]+)[ ,a-z=]+[0-9abcdefx]+[ ,a-z=]+(?P<port_num>[0-9abcdefx]+)"
     regex_decoding = r"(?P<decoding>decoded message|no PSK)"
+    regex_role = r"Role (?P<id>[0-9abcdef]{8}) = (?P<role>[0-9]+), HW = (?P<hw>[0-9]+)"
 
     # Keep track of each received packet type (named module in debug log)
     module_count = _globals.getModuleCount()
@@ -619,6 +641,23 @@ def journalLogger():
                         cur.close()
                     continue
 
+                # Store received node role and hardware version
+                match = re.search(regex_role, line)
+                if match is not None:
+                    id = int(match.group("id"), 16)
+                    # Ignore broadcast or unknown ID
+                    if id == 0xFFFFFFFF or id == 0:
+                        continue
+                    role = int(match.group("role"), 10) or 0
+                    hw = int(match.group("hw"), 10) or 0
+                    with lock:
+                        cur = database.cursor()
+                        data = [{"id": id, "role": role, "hw": hw},]
+                        cur.executemany("UPDATE OR IGNORE nodes SET role = :role, hardware = :hw WHERE id = :id;", data)
+                        database.commit()
+                        cur.close()
+                    continue
+
                 # Count error -7 (CRC mismatch) for reception quality statistics
                 if "error=-7" in line:
                     module_count["error7"] += 1
@@ -651,8 +690,8 @@ def journalLogger():
                                 cur = database.cursor()                
                                 data = [{"source": source, "destination": dest, "snr": snr},]
                                 cur.executemany("INSERT OR REPLACE INTO links VALUES(:source, :destination, :snr, strftime('%s','now'));", data)
-                                cur.executemany("INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now')", ({"id":source},))
-                                cur.executemany("INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now')", ({"id":dest},))
+                                cur.executemany("INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');", ({"id":source},))
+                                cur.executemany("INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');", ({"id":dest},))
                                 if n == 0:
                                     cur.executemany("UPDATE OR IGNORE nodes SET tracestart = tracestart + 1 where id = :id;", ({"id":source},))
                                 database.commit()
