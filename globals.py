@@ -36,6 +36,8 @@ class Globals:
         self.args = None
         self.parser = None
         self.lock = None
+        self.reader = None
+        self.ev_run = None
         self.module_count = {
             'DeviceTelemetry': 0,
             'EnvironmentTelemetry': 0,
@@ -48,33 +50,6 @@ class Globals:
             'admin': 0,
             'routing': 0,
             'traceroute': 0,
-            'position': 0,
-            'nodeinfo': 0,
-            'text msg': 0,
-            'waypoint msg': 0,
-            'startlog': None,
-            'error7': 0,
-            'decoded': 0,
-            'encrypted': 0,
-        }
-
-    def reset(self):
-        """Reset all of our globals. If you add a member, add it to this method, too."""
-        self.args = None
-        self.parser = None
-        self.lock = None
-        self.module_count = {
-            'DeviceTelemetry': 0,
-            'EnvironmentTelemetry': 0,
-            'PowerTelemetry': 0,
-            'HostMetrics': 0,
-            'AirQuality': 0,
-            'HealthTelemetry': 0,
-            'StoreForward': 0,
-            'ExternalNotificationModule': 0,
-            'admin': 0,
-            'traceroute': 0,
-            'routing': 0,
             'position': 0,
             'nodeinfo': 0,
             'text msg': 0,
@@ -102,6 +77,14 @@ class Globals:
         """Set the module counter"""
         self.module_count = module_count
 
+    def setReader(self, reader):
+        """Set the reader"""
+        self.reader = reader
+
+    def setEvRunning(self, ev_running):
+        """Set the event running flag"""
+        self.ev_run = ev_running
+
     # getters
     def getArgs(self):
         """Get args"""
@@ -114,7 +97,15 @@ class Globals:
     def getLock(self):
         """Get the lock"""
         return self.lock
-    
+
     def getModuleCount(self):
         """Get the module counter"""
         return self.module_count
+
+    def getReader(self):
+        """Get the reader"""
+        return self.reader
+
+    def getEvRunning(self):
+        """Get the event running flag"""
+        return self.ev_run
