@@ -66,6 +66,36 @@ python3 meshtastic_observer_serial.py --dev /dev/ttyUSB0
 python3 meshtastic_observer.py
 ```
 
+## Configuration
+
+Configuration of the systemd journal and meshtasticd native service is required when running on Linux.
+
+meshtasticd native service will create a hugh journal log when the debug level is configured. Therefore the journal will be stored in memory and size limited to avoid excessive disk usage.
+
+```bash
+# Open the journal daemon configuration
+sudo nano /etc/systemd/journald.conf
+
+# Uncomment and change at least the following two lines
+# Journal is stored in volatile memory
+# Limit size to 48 MByte during runtime
+[Journal]
+Storage=volatile
+RuntimeMaxUse=48M
+
+# Adjust limit as desired
+```
+
+Activate the debug level log in journal for meshtasticd native service.
+```bash
+# Open meschtasticd configuration
+sudo nano /etc/meshtasticd/config.yaml
+
+# Set log level to debug
+Logging:
+  LogLevel: debug # debug, info, warn, error
+```
+
 ## Create systemd service
 ```bash
 # Open meshobserver.service and change the folder names to your repository clone location
@@ -96,4 +126,4 @@ Web content will be generated in the _./web_ sub-folder. Statistical graph for e
 ## npm package
 No, I will not create an npm package for this.
 
-This is some pragmatic, individual code for personal use. Feel free to create pull requests in case you want to change or improve the sourcecode. Appreciated.
+This is some pragmatic, individual code for personal use. Feel free to create pull requests in case you want to change or improve the sourcecode. Contribution appreciated.
