@@ -550,12 +550,13 @@ def logParser():
     # Keep track of each received packet type (named module in debug log)
     module_count = _globals.getModuleCount()
     module_count['startlog'] = datetime.datetime.now()
+    is_telemetry_packet = False
+    telemetry_from_id = 0
 
     # Parse the Meshtastic debug log
-    reader.log(f"Log parser started as {reader.__class__.__name__}", level=reader.LOG_INFO)
+    reader.log(
+        f"Log parser started as {reader.__class__.__name__}", level=reader.LOG_INFO)
     while ev_run.is_set():
-        is_telemetry_packet = False
-        telemetry_from_id = 0
         for line in reader.poll_read():
             if line is None:
                 ev_run.clear()  # Stop the thread if reading serial device failed
