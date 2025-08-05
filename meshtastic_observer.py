@@ -31,6 +31,7 @@ import math
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+from matplotlib.patches import Rectangle
 import seaborn as sns
 import sqlite3
 import ftp_credentials
@@ -293,6 +294,27 @@ def statistics(hourly=False):
             "type"].count().nlargest(10).to_dict()
         top10_types = packets.groupby(["longname", "port_name"])[
             "type"].count().nlargest(10, "first").to_dict()
+        # Create hourly heatmap graph
+        grouped = packets.groupby(
+            [packets['time'].dt.day, packets['time'].dt.hour])
+        hourly_counts = grouped.size().unstack(fill_value=0)
+        # Get the maximum value and its index
+        max_idx = hourly_counts.stack().idxmax()
+        max_y = hourly_counts.index.get_loc(max_idx[0])
+        max_x = hourly_counts.columns.get_loc(max_idx[1])
+        plt.figure(figsize=(12, 4))
+        cmap = sns.light_palette("limegreen", n_colors=5)
+        hourly_plot = sns.heatmap(
+            hourly_counts, cmap=cmap, annot=True, fmt="d")
+        # Highlight the maximum value in the heatmap
+        hourly_plot.add_patch(Rectangle((max_x, max_y), 1, 1,
+                                        fill=False, edgecolor='red', lw=1))
+        plt.xlabel("Stunde")
+        plt.ylabel("Tag")
+        plt.title("Pakete pro Tag über Stunden")
+        plt.savefig(os.getcwd() + "/web/hourly_heatmap.png",
+                    dpi=100, bbox_inches="tight")
+        plt.close()
         # Create number of nodes distribution over hours graph
         daily_nodes_nunique = packets.groupby(
             [packets['time'].dt.hour]).source.nunique().to_numpy()
