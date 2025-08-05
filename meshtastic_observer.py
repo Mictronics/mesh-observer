@@ -294,18 +294,18 @@ def statistics(hourly=False):
         top10_types = packets.groupby(["longname", "port_name"])[
             "type"].count().nlargest(10, "first").to_dict()
         # Create number of nodes distribution over hours graph
-        hourly_nunique = packets.groupby(
+        daily_nodes_nunique = packets.groupby(
             [packets['time'].dt.hour]).source.nunique().to_numpy()
-        hourly_plot = sns.barplot(
-            data=hourly_nunique,
+        daily_plot = sns.barplot(
+            data=daily_nodes_nunique,
             color="limegreen"
         )
-        hourly_plot.set_xlabel("Stunde")
-        hourly_plot.set_ylabel("Knoten")
-        hourly_plot.set(title="Messzeitraum: " + period)
-        hourly_plot.figure.suptitle(
+        daily_plot.set_xlabel("Stunde")
+        daily_plot.set_ylabel("Knoten")
+        daily_plot.set(title="Messzeitraum: " + period)
+        daily_plot.figure.suptitle(
             "Verteilung eindeutige Knoten über die Tageszeit im Messzeitraum")
-        hourly_plot.axhline(y=40).set_color("red")
+        daily_plot.axhline(y=40).set_color("red")
         plt.savefig(os.getcwd() + "/web/daily.png",
                     dpi=100, bbox_inches="tight")
         plt.close()
