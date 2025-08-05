@@ -783,9 +783,9 @@ def scheduleRunner():
     ev_run = _globals.getEvRunning()
     if ev_run is None:
         return  # No event to run, exit the thread
-    schedule.every().hour.do(hourlyRunner)
-    schedule.every().day.at("11:52:00", "Europe/Berlin").do(dailyRunner)
-    schedule.every().day.at("23:52:00", "Europe/Berlin").do(dailyRunner)
+    schedule.every().hour.at(":10").do(hourlyRunner)
+    schedule.every().day.at("11:59:00", "Europe/Berlin").do(dailyRunner)
+    schedule.every().day.at("23:59:00", "Europe/Berlin").do(dailyRunner)
     reader.log("Scheduler started", level=reader.LOG_INFO)
     while ev_run.is_set():
         schedule.run_pending()
