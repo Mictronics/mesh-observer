@@ -309,9 +309,9 @@ def statistics(hourly=False):
         # Highlight the maximum value in the heatmap
         hourly_plot.add_patch(Rectangle((max_x, max_y), 1, 1,
                                         fill=False, edgecolor='red', lw=1))
-        plt.xlabel("Stunde")
-        plt.ylabel("Tag")
-        plt.title("Pakete pro Tag über Stunden")
+        hourly_plot.figure.suptitle("Pakete pro Tag über Stunden")
+        hourly_plot.set_xlabel("Stunde")
+        hourly_plot.set_ylabel("Tag")
         plt.savefig(os.getcwd() + "/web/hourly_heatmap.png",
                     dpi=100, bbox_inches="tight")
         plt.close()
