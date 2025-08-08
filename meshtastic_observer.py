@@ -275,7 +275,9 @@ def statistics(hourly=False):
 
             query = "SELECT * FROM ViewPackets;"
             packets = pd.read_sql(query, database)
-            packets["time"] = pd.to_datetime(packets["time"], unit="s")
+            # Correct UTC timestamps to local timezone
+            packets["time"] = pd.to_datetime(packets["time"], unit="s").dt.tz_localize(
+                "UTC").dt.tz_convert("Europe/Berlin")
 
         # Set global plot parameters
         plt.set_loglevel('WARNING')
