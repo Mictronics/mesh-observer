@@ -364,8 +364,8 @@ def statistics(hourly=False):
                 role = "Unbekannte Rolle"
             packet_count = node_packets.shape[0]
             load = 100 * (packet_count / total_packets)
-            # Skip nodes with mesh load less than 0.1%
-            if load < 0.1:
+            # Skip nodes with mesh load less than 0.25%
+            if load < 0.25:
                 continue
             # Add node to dataframe
             html_nodes.append(dict(
