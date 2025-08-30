@@ -66,7 +66,7 @@ INSERT OR REPLACE INTO "packet_types" VALUES (515,'Host Metrics');
 INSERT OR REPLACE INTO "packet_types" VALUES (516,'Air Quality');
 INSERT OR REPLACE INTO "packet_types" VALUES (517,'Health Telemetry');
 CREATE VIEW ViewPackets AS
-SELECT source, longname, type, port_name, strftime('%d.%m.%Y %H:%M',time, 'unixepoch', 'localtime') as 'seen', role FROM packets AS p
+SELECT source, longname, type, port_name, time, role FROM packets AS p
 INNER JOIN packet_types ON packet_types.port_num = p.type
 INNER JOIN nodes ON nodes.id = p.source;
 CREATE TRIGGER delete_old_links
