@@ -439,6 +439,11 @@ def statistics(hourly=False):
         with open(index_file, 'w', encoding='utf-8') as f:
             f.write(html)
 
+        # Reset module count for next statistics period
+        module_count["decoded"] = 0
+        module_count["encrypted"] = 0
+        _globals.setModuleCount(module_count)
+
     except Exception as e:
         reader.log(
             f"Creating network statistics failed. Error: {e}", level=reader.LOG_ERR)
