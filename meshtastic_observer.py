@@ -18,31 +18,32 @@
 # along with mesh observer. If not, see http://www.gnu.org/licenses/.
 #
 import argparse
-import os
-import signal
-import sys
-import re
 import datetime
-import time
-import threading
+
 # trunk-ignore(bandit/B402)
 import ftplib
 import math
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.patches import Rectangle
-import seaborn as sns
+import os
+import re
+import signal
 import sqlite3
-import ftp_credentials
-import schedule
+import sys
+import threading
+import time
 
-from jinja2 import Environment, FileSystemLoader
-from globals import Globals
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import pandas as pd
+import schedule
+import seaborn as sns
 from d3graph import d3graph, vec2adjmat
+from jinja2 import Environment, FileSystemLoader
+from matplotlib.patches import Rectangle
+
+import ftp_credentials
+from globals import Globals
 from journal_reader import JournalReader
 from serial_reader import SerialReader
-
 
 __author__ = "Michael Wolf aka Mictronics"
 __copyright__ = "2025, (C) Michael Wolf"
@@ -67,7 +68,7 @@ def initArgParser():
         "-g",
         "--graph",
         help="Visualize the Meshtastic network from database",
-        action='count',
+        action="count",
         default=0,
         required=False,
     )
@@ -76,14 +77,13 @@ def initArgParser():
         "-s",
         "--stats",
         help="Generate the Meshtastic network statistics from database",
-        action='count',
+        action="count",
         default=0,
         required=False,
     )
 
     parser.set_defaults(deprecated=None)
-    parser.add_argument("--version", action="version",
-                        version=f"{__version__}")
+    parser.add_argument("--version", action="version", version=f"{__version__}")
 
     args = parser.parse_args()
     _globals.setArgs(args)
@@ -95,7 +95,11 @@ def ftp_upload(hourly=False):
     # Change to the target remote folder (create if necessary)
     try:
         ftp_server = ftplib.FTP_TLS(
-            ftp_credentials.__hostname__, ftp_credentials.__username__, ftp_credentials.__password__, timeout=5)
+            ftp_credentials.__hostname__,
+            ftp_credentials.__username__,
+            ftp_credentials.__password__,
+            timeout=5,
+        )
         ftp_server.encoding = "utf-8"
         ftp_server.cwd(ftp_credentials.__remote_folder__)
     except Exception:
@@ -116,8 +120,9 @@ def ftp_upload(hourly=False):
     # Upload entire web folder including sub-folders
     for root, _dirs, files in os.walk(ftp_credentials.__local_folder__):
         rel_path = os.path.relpath(root, ftp_credentials.__local_folder__)
-        ftp_path = os.path.join(
-            ftp_credentials.__remote_folder__, rel_path).replace("\\", "/")
+        ftp_path = os.path.join(ftp_credentials.__remote_folder__, rel_path).replace(
+            "\\", "/"
+        )
 
         # Ensure remote directory exists
         try:
@@ -138,8 +143,8 @@ def ftp_upload(hourly=False):
         for filename in files:
             local_file = os.path.join(root, filename)
             remote_file = filename
-            with open(local_file, 'rb') as f:
-                ftp_server.storbinary(f'STOR {remote_file}', f)
+            with open(local_file, "rb") as f:
+                ftp_server.storbinary(f"STOR {remote_file}", f)
 
     ftp_server.quit()
 
@@ -150,13 +155,13 @@ def statistics(hourly=False):
     lock = _globals.getLock()
     reader = _globals.getReader()
     database = None
-    plt.set_loglevel('WARNING')
+    plt.set_loglevel("WARNING")
     node_count = 0
     link_count = 0
     module_count = _globals.getModuleCount()
     statistics = {}
     dt = datetime.datetime.now()
-    now_str = dt.strftime('%d.%m.%Y %H:%M')  # Web content update time
+    now_str = dt.strftime("%d.%m.%Y %H:%M")  # Web content update time
 
     roles = [
         "Client",
@@ -171,49 +176,66 @@ def statistics(hourly=False):
         "Lost and Found",
         "TAK Tracker",
         "Router Late",
+        "Client Base",
     ]
 
     try:
         # Create packets/24h statistics
-        if module_count['startlog'] is not None:
-            diff_sec = (datetime.datetime.now() -
-                        module_count['startlog']).total_seconds()
-            statistics['Device Telemetry'] = math.ceil(
-                (module_count['DeviceTelemetry'] / diff_sec) * 60 * 60)
-            statistics['Environment Telemetry'] = math.ceil(
-                (module_count['EnvironmentTelemetry'] / diff_sec) * 60 * 60)
-            statistics['Host Metrics'] = math.ceil(
-                (module_count['HostMetrics'] / diff_sec) * 60 * 60)
-            statistics['Store Forward'] = math.ceil(
-                (module_count['StoreForward'] / diff_sec) * 60 * 60)
-            statistics['Power Telemetry'] = math.ceil(
-                (module_count['PowerTelemetry'] / diff_sec) * 60 * 60)
-            statistics['Traceroute'] = math.ceil(
-                (module_count['traceroute'] / diff_sec) * 60 * 60)
+        if module_count["startlog"] is not None:
+            diff_sec = (
+                datetime.datetime.now() - module_count["startlog"]
+            ).total_seconds()
+            statistics["Device Telemetry"] = math.ceil(
+                (module_count["DeviceTelemetry"] / diff_sec) * 60 * 60
+            )
+            statistics["Environment Telemetry"] = math.ceil(
+                (module_count["EnvironmentTelemetry"] / diff_sec) * 60 * 60
+            )
+            statistics["Host Metrics"] = math.ceil(
+                (module_count["HostMetrics"] / diff_sec) * 60 * 60
+            )
+            statistics["Store Forward"] = math.ceil(
+                (module_count["StoreForward"] / diff_sec) * 60 * 60
+            )
+            statistics["Power Telemetry"] = math.ceil(
+                (module_count["PowerTelemetry"] / diff_sec) * 60 * 60
+            )
+            statistics["Traceroute"] = math.ceil(
+                (module_count["traceroute"] / diff_sec) * 60 * 60
+            )
             # statistics['Routing'] = math.ceil((module_count['routing'] / diff_sec) * 60 * 60)
-            statistics['Position'] = math.ceil(
-                (module_count['position'] / diff_sec) * 60 * 60)
-            statistics['NodeInfo'] = math.ceil(
-                (module_count['nodeinfo'] / diff_sec) * 60 * 60)
-            statistics['Text'] = math.ceil(
-                (module_count['text msg'] / diff_sec) * 60 * 60)
-            statistics['Waypoint'] = math.ceil(
-                (module_count['waypoint msg'] / diff_sec) * 60 * 60)
-            statistics['External Notification'] = math.ceil(
-                (module_count['ExternalNotificationModule'] / diff_sec) * 60 * 60)
-            statistics['Air Quality'] = math.ceil(
-                (module_count['AirQuality'] / diff_sec) * 60 * 60)
-            statistics['Admin'] = math.ceil(
-                (module_count['admin'] / diff_sec) * 60 * 60)
-            statistics['Error7'] = math.ceil(
-                (module_count['error7'] / diff_sec) * 60 * 60)
+            statistics["Position"] = math.ceil(
+                (module_count["position"] / diff_sec) * 60 * 60
+            )
+            statistics["NodeInfo"] = math.ceil(
+                (module_count["nodeinfo"] / diff_sec) * 60 * 60
+            )
+            statistics["Text"] = math.ceil(
+                (module_count["text msg"] / diff_sec) * 60 * 60
+            )
+            statistics["Waypoint"] = math.ceil(
+                (module_count["waypoint msg"] / diff_sec) * 60 * 60
+            )
+            statistics["External Notification"] = math.ceil(
+                (module_count["ExternalNotificationModule"] / diff_sec) * 60 * 60
+            )
+            statistics["Air Quality"] = math.ceil(
+                (module_count["AirQuality"] / diff_sec) * 60 * 60
+            )
+            statistics["Admin"] = math.ceil(
+                (module_count["admin"] / diff_sec) * 60 * 60
+            )
+            statistics["Error7"] = math.ceil(
+                (module_count["error7"] / diff_sec) * 60 * 60
+            )
             statistics = dict(
-                sorted(statistics.items(), key=lambda item: item[1], reverse=True))
+                sorted(statistics.items(), key=lambda item: item[1], reverse=True)
+            )
 
             stats_plot = sns.barplot(
                 data=statistics,
                 color="limegreen",
-                orient='h',
+                orient="h",
             )
             df = pd.DataFrame(statistics.items())
             sum = df[1].sum()
@@ -221,13 +243,17 @@ def statistics(hourly=False):
                 sum = 1
             for index, row in df.iterrows():
                 plt.text(
-                    row[1], index, f"{row[1]} / {(row[1] / sum) * 100:.1f}%", color='black', va="center")
+                    row[1],
+                    index,
+                    f"{row[1]} / {(row[1] / sum) * 100:.1f}%",
+                    color="black",
+                    va="center",
+                )
             stats_plot.set_xlabel("Packete / Stunde")
             stats_plot.set_ylabel("Packet Typ")
             stats_plot.set(title="Messzeit: " + now_str)
             stats_plot.figure.suptitle("Packete / Stunde")
-            plt.savefig(os.getcwd() + "/web/stats.png",
-                        dpi=100, bbox_inches="tight")
+            plt.savefig(os.getcwd() + "/web/stats.png", dpi=100, bbox_inches="tight")
             plt.close()
 
             # Create decoding statistics graph
@@ -237,7 +263,7 @@ def statistics(hourly=False):
             decoding_plot = sns.barplot(
                 data=decoding,
                 color="limegreen",
-                orient='h',
+                orient="h",
                 width=0.4,
             )
             df = pd.DataFrame(decoding.items())
@@ -246,15 +272,18 @@ def statistics(hourly=False):
                 sum = 1
             for index, row in df.iterrows():
                 plt.text(
-                    row[1], index, f"{row[1]} / {(row[1] / sum) * 100:.1f}%", color='black', va="center")
+                    row[1],
+                    index,
+                    f"{row[1]} / {(row[1] / sum) * 100:.1f}%",
+                    color="black",
+                    va="center",
+                )
             decoding_plot.set_xlabel("Packete")
             decoding_plot.set_ylabel("Status")
             decoding_plot.set(title="Messzeit: " + now_str)
-            decoding_plot.figure.suptitle(
-                "Anteil privater Packete im Messzeitraum")
+            decoding_plot.figure.suptitle("Anteil privater Packete im Messzeitraum")
             decoding_plot.figure.set_size_inches(8, 4)
-            plt.savefig(os.getcwd() + "/web/decoding.png",
-                        dpi=100, bbox_inches="tight")
+            plt.savefig(os.getcwd() + "/web/decoding.png", dpi=100, bbox_inches="tight")
             plt.close()
 
         if hourly:
@@ -263,24 +292,28 @@ def statistics(hourly=False):
 
         with lock:
             # Fetch packet data from database
-            database = sqlite3.connect(
-                "network.sqlite3", isolation_level='DEFERRED')
+            database = sqlite3.connect("network.sqlite3", isolation_level="DEFERRED")
             cur = database.cursor()
             res = cur.execute(
-                "SELECT count(*) FROM nodes where seen > unixepoch(datetime('now', '-24 hours'));")
+                "SELECT count(*) FROM nodes where seen > unixepoch(datetime('now', '-24 hours'));"
+            )
             node_count = res.fetchone()[0]
             res = cur.execute(
-                "SELECT count(*) FROM links where seen > unixepoch(datetime('now', '-24 hours'));")
+                "SELECT count(*) FROM links where seen > unixepoch(datetime('now', '-24 hours'));"
+            )
             link_count = res.fetchone()[0]
 
             query = "SELECT * FROM ViewPackets;"
             packets = pd.read_sql(query, database)
             # Correct UTC timestamps to local timezone
-            packets["time"] = pd.to_datetime(packets["time"], unit="s").dt.tz_localize(
-                "UTC").dt.tz_convert("Europe/Berlin")
+            packets["time"] = (
+                pd.to_datetime(packets["time"], unit="s")
+                .dt.tz_localize("UTC")
+                .dt.tz_convert("Europe/Berlin")
+            )
 
         # Set global plot parameters
-        plt.set_loglevel('WARNING')
+        plt.set_loglevel("WARNING")
         sns.set_style("whitegrid")
         sns.set_context("paper")
         formatter = mdates.DateFormatter("%d.%m.%Y", tz="CEST")
@@ -288,17 +321,24 @@ def statistics(hourly=False):
         total_packets = packets.shape[0]
         html_nodes = []
         # Get the overall packet data period
-        min_t = packets["time"].min().strftime('%d.%m.%Y')
-        max_t = packets["time"].max().strftime('%d.%m.%Y')
+        min_t = packets["time"].min().strftime("%d.%m.%Y")
+        max_t = packets["time"].max().strftime("%d.%m.%Y")
         period = f"{min_t} - {max_t}"
         # Get top 10 data
-        top10_packets = packets.groupby(["source", "longname"])[
-            "type"].count().nlargest(10).to_dict()
-        top10_types = packets.groupby(["longname", "port_name"])[
-            "type"].count().nlargest(10, "first").to_dict()
+        top10_packets = (
+            packets.groupby(["source", "longname"])["type"]
+            .count()
+            .nlargest(10)
+            .to_dict()
+        )
+        top10_types = (
+            packets.groupby(["longname", "port_name"])["type"]
+            .count()
+            .nlargest(10, "first")
+            .to_dict()
+        )
         # Create hourly heatmap graph
-        grouped = packets.groupby(
-            [packets['time'].dt.day, packets['time'].dt.hour])
+        grouped = packets.groupby([packets["time"].dt.day, packets["time"].dt.hour])
         hourly_counts = grouped.size().unstack(fill_value=0)
         # Get the maximum value and its index
         max_idx = hourly_counts.stack().idxmax()
@@ -306,51 +346,48 @@ def statistics(hourly=False):
         max_x = hourly_counts.columns.get_loc(max_idx[1])
         plt.figure(figsize=(12, 4))
         cmap = sns.light_palette("limegreen", n_colors=5)
-        hourly_plot = sns.heatmap(
-            hourly_counts, cmap=cmap, annot=True, fmt="d")
+        hourly_plot = sns.heatmap(hourly_counts, cmap=cmap, annot=True, fmt="d")
         # Highlight the maximum value in the heatmap
-        hourly_plot.add_patch(Rectangle((max_x, max_y), 1, 1,
-                                        fill=False, edgecolor='red', lw=1))
+        hourly_plot.add_patch(
+            Rectangle((max_x, max_y), 1, 1, fill=False, edgecolor="red", lw=1)
+        )
         hourly_plot.figure.suptitle("Pakete pro Tag über Stunden")
         hourly_plot.set_xlabel("Stunde")
         hourly_plot.set_ylabel("Tag")
-        plt.savefig(os.getcwd() + "/web/hourly_heatmap.png",
-                    dpi=100, bbox_inches="tight")
+        plt.savefig(
+            os.getcwd() + "/web/hourly_heatmap.png", dpi=100, bbox_inches="tight"
+        )
         plt.close()
         # Create number of nodes distribution over hours graph
-        daily_nodes_nunique = packets.groupby(
-            [packets['time'].dt.hour]).source.nunique().to_numpy()
-        daily_plot = sns.barplot(
-            data=daily_nodes_nunique,
-            color="limegreen"
+        daily_nodes_nunique = (
+            packets.groupby([packets["time"].dt.hour]).source.nunique().to_numpy()
         )
+        daily_plot = sns.barplot(data=daily_nodes_nunique, color="limegreen")
         daily_plot.set_xlabel("Stunde")
         daily_plot.set_ylabel("Knoten")
         daily_plot.set(title="Messzeitraum: " + period)
         daily_plot.figure.suptitle(
-            "Verteilung eindeutige Knoten über die Tageszeit im Messzeitraum")
+            "Verteilung eindeutige Knoten über die Tageszeit im Messzeitraum"
+        )
         daily_plot.axhline(y=40).set_color("red")
-        plt.savefig(os.getcwd() + "/web/daily.png",
-                    dpi=100, bbox_inches="tight")
+        plt.savefig(os.getcwd() + "/web/daily.png", dpi=100, bbox_inches="tight")
         plt.close()
         # Create number of packets distribution over days per week graph
-        weekly_packets = packets.groupby([packets['time'].dt.day]).type.count()
+        weekly_packets = packets.groupby([packets["time"].dt.day]).type.count()
         weekly_plot = sns.barplot(
             data=weekly_packets,
             color="limegreen",
             estimator="sum",
             errorbar=None,
-            orient='v',
+            orient="v",
         )
         weekly_plot.set_xlabel("Tag")
         weekly_plot.set_ylabel("Packete")
         weekly_plot.set(title="Messzeitraum: " + period)
-        weekly_plot.figure.suptitle(
-            "Anzahl der Packete pro Tag im Messzeitraum")
+        weekly_plot.figure.suptitle("Anzahl der Packete pro Tag im Messzeitraum")
         for cont in weekly_plot.containers:
             weekly_plot.bar_label(cont, fontsize=8)
-        plt.savefig(os.getcwd() + "/web/weekly.png",
-                    dpi=100, bbox_inches="tight")
+        plt.savefig(os.getcwd() + "/web/weekly.png", dpi=100, bbox_inches="tight")
         plt.close()
 
         # Create packet statistics graph for each node
@@ -368,13 +405,15 @@ def statistics(hourly=False):
             if load < 0.25:
                 continue
             # Add node to dataframe
-            html_nodes.append(dict(
-                id=f"{node_id:08X}",
-                long_name=long_name,
-                packet_count=packet_count,
-                load=round(load, 3),
-                role=role,
-            ))
+            html_nodes.append(
+                dict(
+                    id=f"{node_id:08X}",
+                    long_name=long_name,
+                    packet_count=packet_count,
+                    load=round(load, 3),
+                    role=role,
+                )
+            )
             # Create single node statistics graph
             node_plot = sns.catplot(
                 data=node_packets,
@@ -387,20 +426,24 @@ def statistics(hourly=False):
             node_plot.ax.xaxis.set_major_formatter(formatter)
             node_plot.set_axis_labels("Zeitraum: " + period, "Packet Typ")
             node_plot.set(autoscalex_on=True)
-            node_plot.set_xticklabels(rotation=45, ha='right', step=2)
+            node_plot.set_xticklabels(rotation=45, ha="right", step=2)
             node_plot.set(
-                title=f"{long_name} / {node_id:08X} / Mesh Last: {load:0.2f}%")
+                title=f"{long_name} / {node_id:08X} / Mesh Last: {load:0.2f}%"
+            )
             # Calculate mean interval for each packet type of a single node
             delta_t_stats = {}
             for packet_group, packet_details in node_packets.groupby(["port_name"]):
                 time_cnt = packet_details["time"].count()
                 if time_cnt > 1:
-                    packet_details["delta_t"] = packet_details["time"].diff(
-                    ).dt.total_seconds()
+                    packet_details["delta_t"] = (
+                        packet_details["time"].diff().dt.total_seconds()
+                    )
                     stat = packet_details["delta_t"].agg(
-                        ["median", "count"])  # "median", "mean", "min", "max"
-                    mean_str = str(datetime.timedelta(
-                        seconds=math.ceil(stat["median"])))
+                        ["median", "count"]
+                    )  # "median", "mean", "min", "max"
+                    mean_str = str(
+                        datetime.timedelta(seconds=math.ceil(stat["median"]))
+                    )
                     delta_t_stats[packet_group[0]] = "Median: " + mean_str
             # Add mean value to each packet type in graph
             for ax in node_plot.axes.flat:
@@ -408,19 +451,24 @@ def statistics(hourly=False):
                 for label in labels:
                     _, y = label.get_position()
                     txt = label.get_text()
-                    h = 0.76 / (len(labels)+1)
+                    h = 0.76 / (len(labels) + 1)
                     node_plot.figure.text(
-                        1.0, 0.97 - h - (h * y), delta_t_stats.get(txt, "N/A"))
+                        1.0, 0.97 - h - (h * y), delta_t_stats.get(txt, "N/A")
+                    )
             # Save node statistics graph
-            plt.savefig(f"{os.getcwd()}/web/images/{node_id:08X}.png",
-                        dpi=100, bbox_inches="tight")
+            plt.savefig(
+                f"{os.getcwd()}/web/images/{node_id:08X}.png",
+                dpi=100,
+                bbox_inches="tight",
+            )
             plt.close()
 
         # Generate statistical web content
         html_nodes.sort(key=lambda x: x["load"], reverse=True)
-        jinja_env = Environment(loader=FileSystemLoader(
-            "index.html.j2"), autoescape=True)
-        index_template = jinja_env.get_template('')
+        jinja_env = Environment(
+            loader=FileSystemLoader("index.html.j2"), autoescape=True
+        )
+        index_template = jinja_env.get_template("")
         html = index_template.render(
             html_nodes=html_nodes,
             period=period,
@@ -436,7 +484,7 @@ def statistics(hourly=False):
         index_file = os.getcwd() + "/web/index.html"
         if os.path.isfile(index_file):
             os.remove(index_file)
-        with open(index_file, 'w', encoding='utf-8') as f:
+        with open(index_file, "w", encoding="utf-8") as f:
             f.write(html)
 
         # Reset module count for next statistics period
@@ -446,7 +494,8 @@ def statistics(hourly=False):
 
     except Exception as e:
         reader.log(
-            f"Creating network statistics failed. Error: {e}", level=reader.LOG_ERR)
+            f"Creating network statistics failed. Error: {e}", level=reader.LOG_ERR
+        )
 
     finally:
         if database is not None:
@@ -465,55 +514,59 @@ def graph(all=False):
 
     try:
         with lock:
-            database = sqlite3.connect(
-                "network.sqlite3", isolation_level="DEFERRED")
+            database = sqlite3.connect("network.sqlite3", isolation_level="DEFERRED")
             cur = database.cursor()
             if all:
                 res = cur.execute("select * from nodes;")
             else:
                 res = cur.execute(
-                    "select * from nodes where seen > unixepoch(datetime('now', '-24 hours'));")
+                    "select * from nodes where seen > unixepoch(datetime('now', '-24 hours'));"
+                )
             for row in res:
-                nodes[f'{row[0]:08X}'] = {
-                    "short": row[1], "long": row[2], "seen": row[3]}
+                nodes[f"{row[0]:08X}"] = {
+                    "short": row[1],
+                    "long": row[2],
+                    "seen": row[3],
+                }
 
             if all:
                 res = cur.execute("select * from links;")
             else:
                 res = cur.execute(
-                    "select * from links where seen > unixepoch(datetime('now', '-24 hours'));")
+                    "select * from links where seen > unixepoch(datetime('now', '-24 hours'));"
+                )
             for row in res:
                 src = row[0]
                 dst = row[1]
                 snr = row[2]
-                sources.append(f'{src:08X}')
-                destinations.append(f'{dst:08X}')
+                sources.append(f"{src:08X}")
+                destinations.append(f"{dst:08X}")
                 if snr <= -500:
                     edge_labels.append("? dB")
                 else:
                     edge_labels.append(f"{snr:0.2f} dB")
             cur.close()
 
-        d3 = d3graph(charge=2000, slider=None, verbose=40,
-                     support="Mictronics", collision=3)
+        d3 = d3graph(
+            charge=2000, slider=None, verbose=40, support="Mictronics", collision=3
+        )
         adjmat = vec2adjmat(sources, destinations, weight=None)
         d3.graph(adjmat, cmap="tab20")
         d3.set_path(os.getcwd() + "/web/visualization.html")
         for n in range(len(sources)):
-            d3.edge_properties[sources[n], destinations[n]
-                               ]['label'] = edge_labels[n]
-            d3.edge_properties[sources[n], destinations[n]]['directed'] = True
+            d3.edge_properties[sources[n], destinations[n]]["label"] = edge_labels[n]
+            d3.edge_properties[sources[n], destinations[n]]["directed"] = True
 
         for node in d3.node_properties:
             if node in nodes.keys():
                 dt = datetime.datetime.fromtimestamp(nodes[node]["seen"])
-                last = dt.strftime('%d.%m.%Y %H:%M:%S')
-                d3.node_properties[node]['cmap'] = "tab20"
+                last = dt.strftime("%d.%m.%Y %H:%M:%S")
+                d3.node_properties[node]["cmap"] = "tab20"
                 if nodes[node]["short"] is not None:
                     short = nodes[node]["short"]
                     long = nodes[node]["long"]
-                    d3.node_properties[node]['tooltip'] = f"{short}\n{long}\n{last}"
-                    d3.node_properties[node]['label'] = short
+                    d3.node_properties[node]["tooltip"] = f"{short}\n{long}\n{last}"
+                    d3.node_properties[node]["label"] = short
 
         d3.show(
             filepath=os.getcwd() + "/web/visualization.html",
@@ -521,11 +574,11 @@ def graph(all=False):
             title="Meshtastic Netzwerk Bayern",
             figsize=[None, None],
             showfig=False,
-            save_button=False)
+            save_button=False,
+        )
 
     except Exception as e:
-        reader.log(
-            f"Creating network graph failed. Error: {e}", level=reader.LOG_ERR)
+        reader.log(f"Creating network graph failed. Error: {e}", level=reader.LOG_ERR)
 
     finally:
         if database is not None:
@@ -561,11 +614,9 @@ def logParser():
 
     # Connect to database
     try:
-        database = sqlite3.connect(
-            "network.sqlite3", isolation_level='DEFERRED')
+        database = sqlite3.connect("network.sqlite3", isolation_level="DEFERRED")
     except Exception as e:
-        reader.log(
-            f"Connection to database failed. Error: {e}", level=reader.LOG_ERR)
+        reader.log(f"Connection to database failed. Error: {e}", level=reader.LOG_ERR)
         sys.exit(1)
 
     # Regular Expressions to match with different debug log line content
@@ -578,13 +629,14 @@ def logParser():
 
     # Keep track of each received packet type (named module in debug log)
     module_count = _globals.getModuleCount()
-    module_count['startlog'] = datetime.datetime.now()
+    module_count["startlog"] = datetime.datetime.now()
     is_telemetry_packet = False
     telemetry_from_id = 0
 
     # Parse the Meshtastic debug log
     reader.log(
-        f"Log parser started as {reader.__class__.__name__}", level=reader.LOG_INFO)
+        f"Log parser started as {reader.__class__.__name__}", level=reader.LOG_INFO
+    )
     while ev_run.is_set():
         for line in reader.poll_read():
             if line is None:
@@ -604,7 +656,9 @@ def logParser():
                         continue
                     if type not in port_numbers.keys():
                         reader.log(
-                            f"Unknown packet type: {type} from {telemetry_from_id}", level=reader.LOG_WARNING)
+                            f"Unknown packet type: {type} from {telemetry_from_id}",
+                            level=reader.LOG_WARNING,
+                        )
 
                     else:
                         num = port_numbers[type]
@@ -614,9 +668,12 @@ def logParser():
                             with lock:
                                 cur = database.cursor()
                                 data = [
-                                    {"id": telemetry_from_id, "type": num},]
+                                    {"id": telemetry_from_id, "type": num},
+                                ]
                                 cur.executemany(
-                                    "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));", data)
+                                    "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));",
+                                    data,
+                                )
                                 database.commit()
                                 cur.close()
                         else:
@@ -633,23 +690,35 @@ def logParser():
             if is_telemetry_packet:
                 data = None
                 if "air_util_tx" in line:
-                    module_count['DeviceTelemetry'] += 1
-                    data = [{"id": telemetry_from_id, "type": 512},]
+                    module_count["DeviceTelemetry"] += 1
+                    data = [
+                        {"id": telemetry_from_id, "type": 512},
+                    ]
                 elif "ch1_voltage" in line:
-                    module_count['PowerTelemetry'] += 1
-                    data = [{"id": telemetry_from_id, "type": 513},]
+                    module_count["PowerTelemetry"] += 1
+                    data = [
+                        {"id": telemetry_from_id, "type": 513},
+                    ]
                 elif "barometric_pressure" in line:
-                    module_count['EnvironmentTelemetry'] += 1
-                    data = [{"id": telemetry_from_id, "type": 514},]
+                    module_count["EnvironmentTelemetry"] += 1
+                    data = [
+                        {"id": telemetry_from_id, "type": 514},
+                    ]
                 elif "diskfree" in line:
-                    module_count['HostMetrics'] += 1
-                    data = [{"id": telemetry_from_id, "type": 515},]
+                    module_count["HostMetrics"] += 1
+                    data = [
+                        {"id": telemetry_from_id, "type": 515},
+                    ]
                 elif "pm10_standard" in line:
-                    module_count['AirQuality'] += 1
-                    data = [{"id": telemetry_from_id, "type": 516},]
+                    module_count["AirQuality"] += 1
+                    data = [
+                        {"id": telemetry_from_id, "type": 516},
+                    ]
                 elif "heart_bpm" in line:
-                    module_count['HealthTelemetry'] += 1
-                    data = [{"id": telemetry_from_id, "type": 517},]
+                    module_count["HealthTelemetry"] += 1
+                    data = [
+                        {"id": telemetry_from_id, "type": 517},
+                    ]
 
                 if data is not None:
                     # Store telemetry packet in database
@@ -657,7 +726,9 @@ def logParser():
                         _globals.setModuleCount(module_count)
                         cur = database.cursor()
                         cur.executemany(
-                            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));", data)
+                            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));",
+                            data,
+                        )
                         database.commit()
                         cur.close()
 
@@ -669,9 +740,9 @@ def logParser():
             decoding = re.search(regex_decoding, line)
             if decoding is not None:
                 if decoding.group("decoding") == "decoded message":
-                    module_count['decoded'] += 1
+                    module_count["decoded"] += 1
                 elif decoding.group("decoding") == "no PSK":
-                    module_count['encrypted'] += 1
+                    module_count["encrypted"] += 1
                 with lock:
                     _globals.setModuleCount(module_count)
                 continue
@@ -696,10 +767,13 @@ def logParser():
 
                 with lock:
                     cur = database.cursor()
-                    data = [{"id": id, "shortname": short_name,
-                             "longname": long_name},]
+                    data = [
+                        {"id": id, "shortname": short_name, "longname": long_name},
+                    ]
                     cur.executemany(
-                        "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET shortname=:shortname, longname=:longname, seen=strftime('%s','now');", data)
+                        "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET shortname=:shortname, longname=:longname, seen=strftime('%s','now');",
+                        data,
+                    )
                     database.commit()
                     cur.close()
                 continue
@@ -715,9 +789,13 @@ def logParser():
                 lon = int(pos.group(3), 10) * 1e-7
                 with lock:
                     cur = database.cursor()
-                    data = [{"id": id, "lat": lat, "lon": lon},]
+                    data = [
+                        {"id": id, "lat": lat, "lon": lon},
+                    ]
                     cur.executemany(
-                        "UPDATE OR IGNORE nodes SET seen = strftime('%s','now'), latitude = :lat, longitude = :lon WHERE id = :id;", data)
+                        "UPDATE OR IGNORE nodes SET seen = strftime('%s','now'), latitude = :lat, longitude = :lon WHERE id = :id;",
+                        data,
+                    )
                     database.commit()
                     cur.close()
                 continue
@@ -733,9 +811,13 @@ def logParser():
                 hw = int(match.group("hw"), 10) or 0
                 with lock:
                     cur = database.cursor()
-                    data = [{"id": id, "role": role, "hw": hw},]
+                    data = [
+                        {"id": id, "role": role, "hw": hw},
+                    ]
                     cur.executemany(
-                        "UPDATE OR IGNORE nodes SET role = :role, hardware = :hw WHERE id = :id;", data)
+                        "UPDATE OR IGNORE nodes SET role = :role, hardware = :hw WHERE id = :id;",
+                        data,
+                    )
                     database.commit()
                     cur.close()
                 continue
@@ -750,7 +832,11 @@ def logParser():
             # Evaluate all received trace route packets.
             # Packets are split into 2 point connections and stored in database as link between two nodes.
             # Used in mesh visualization.
-            if line.startswith("#Start") or line.startswith("|") or line.startswith("#Back"):
+            if (
+                line.startswith("#Start")
+                or line.startswith("|")
+                or line.startswith("#Back")
+            ):
                 source = None
                 dest = None
                 snr = None
@@ -766,21 +852,36 @@ def logParser():
                         source = int(source.group(1), 16)
                         dest = int(dest.group(1), 16)
                         # Ignore broadcast, unknown ID or equal source-destination
-                        if source == 0xFFFFFFFF or dest == 0xFFFFFFFF or source == 0 or dest == 0 or source == dest:
+                        if (
+                            source == 0xFFFFFFFF
+                            or dest == 0xFFFFFFFF
+                            or source == 0
+                            or dest == 0
+                            or source == dest
+                        ):
                             continue
                         with lock:
                             cur = database.cursor()
                             data = [
-                                {"source": source, "destination": dest, "snr": snr},]
+                                {"source": source, "destination": dest, "snr": snr},
+                            ]
                             cur.executemany(
-                                "INSERT OR REPLACE INTO links VALUES(:source, :destination, :snr, strftime('%s','now'));", data)
+                                "INSERT OR REPLACE INTO links VALUES(:source, :destination, :snr, strftime('%s','now'));",
+                                data,
+                            )
                             cur.executemany(
-                                "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');", ({"id": source},))
+                                "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
+                                ({"id": source},),
+                            )
                             cur.executemany(
-                                "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');", ({"id": dest},))
+                                "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
+                                ({"id": dest},),
+                            )
                             if n == 0:
                                 cur.executemany(
-                                    "UPDATE OR IGNORE nodes SET tracestart = tracestart + 1 where id = :id;", ({"id": source},))
+                                    "UPDATE OR IGNORE nodes SET tracestart = tracestart + 1 where id = :id;",
+                                    ({"id": source},),
+                                )
                             database.commit()
                             cur.close()
                 continue
