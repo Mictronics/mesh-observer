@@ -603,6 +603,7 @@ def logParser():
         "environmenttelemetry": 67,
         "hostmetrics": 67,
         "traceroute": 70,
+        "time": 3,
     }
 
     _globals = Globals.getInstance()
