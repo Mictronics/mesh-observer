@@ -92,15 +92,15 @@ def initArgParser():
 
 def ftp_upload(hourly=False):
     """Upload generated web content via FTP to remote server."""
-    # Change to the target remote folder (create if necessary)
+    ftp_server = ftplib.FTP_TLS(
+        ftp_credentials.__hostname__,
+        ftp_credentials.__username__,
+        ftp_credentials.__password__,
+        timeout=5,
+    )
+    ftp_server.encoding = "utf-8"
+    # Change to the target remote folder, creating it first if it doesn't exist yet
     try:
-        ftp_server = ftplib.FTP_TLS(
-            ftp_credentials.__hostname__,
-            ftp_credentials.__username__,
-            ftp_credentials.__password__,
-            timeout=5,
-        )
-        ftp_server.encoding = "utf-8"
         ftp_server.cwd(ftp_credentials.__remote_folder__)
     except Exception:
         ftp_server.mkd(ftp_credentials.__remote_folder__)
@@ -285,6 +285,14 @@ def statistics(hourly=False):
             decoding_plot.figure.set_size_inches(8, 4)
             plt.savefig(os.getcwd() + "/web/decoding.png", dpi=100, bbox_inches="tight")
             plt.close()
+
+            # Reset all counters and restart the measurement window for the next hour
+            for key in module_count:
+                if key != "startlog":
+                    module_count[key] = 0
+            module_count["startlog"] = datetime.datetime.now()
+            with lock:
+                _globals.setModuleCount(module_count)
 
         if hourly:
             # Do nothing else when called hourly
@@ -487,11 +495,6 @@ def statistics(hourly=False):
         with open(index_file, "w", encoding="utf-8") as f:
             f.write(html)
 
-        # Reset module count for next statistics period
-        module_count["decoded"] = 0
-        module_count["encrypted"] = 0
-        _globals.setModuleCount(module_count)
-
     except Exception as e:
         reader.log(
             f"Creating network statistics failed. Error: {e}", level=reader.LOG_ERR
@@ -511,6 +514,7 @@ def graph(all=False):
     destinations = []
     edge_labels = []
     nodes = {}
+    database = None
 
     try:
         with lock:
@@ -618,7 +622,10 @@ def logParser():
         database = sqlite3.connect("network.sqlite3", isolation_level="DEFERRED")
     except Exception as e:
         reader.log(f"Connection to database failed. Error: {e}", level=reader.LOG_ERR)
-        sys.exit(1)
+        # sys.exit() would only stop this thread, not the whole program;
+        # clear the shared run event so the scheduler thread stops too.
+        ev_run.clear()
+        return
 
     # Regular Expressions to match with different debug log line content
     regex_traceroute = r"([0-9abcdef]{8})[ ]?(\(([0-9.-]{0,6})dB\))?"
