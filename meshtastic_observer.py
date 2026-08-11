@@ -794,6 +794,10 @@ def logParser():
                     continue
                 lat = int(pos.group(2), 10) * 1e-7
                 lon = int(pos.group(3), 10) * 1e-7
+                # lat=0/lon=0 means "no GPS fix" (l=0 payload); skip to avoid
+                # overwriting a node's last known position with Null Island.
+                if lat == 0 and lon == 0:
+                    continue
                 with lock:
                     cur = database.cursor()
                     data = [
