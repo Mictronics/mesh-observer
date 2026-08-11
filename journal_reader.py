@@ -25,7 +25,7 @@ class JournalReader:
 
         except Exception as ex:
             self.log(
-                f"Failed creating journal reader. Error was:{ex}", level=self.logger.LOG_ERR)
+                f"Failed creating journal reader. Error was:{ex}", level=self.LOG_ERR)
 
     def poll_read(self):
         entries = []

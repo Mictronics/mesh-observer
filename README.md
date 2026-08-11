@@ -35,9 +35,12 @@ python3 create_database.py
 ```
 
 ## Create FTP credentials
-The script will upload the generated web content automatically to a remote web server.
 
-Create a Python file named `ftp_credentials.py`with the following content.
+FTP upload is optional. The script will upload the generated web content automatically to a
+remote web server only if `ftp_credentials.py` exists; if it doesn't, FTP upload is skipped and
+the failure is logged, nothing else needs to be changed in the code.
+
+To enable it, create a Python file named `ftp_credentials.py` with the following content.
 ```python
 import os
 
@@ -50,8 +53,6 @@ __remote_folder__ = "/"
 # Change above credentials and remote folder as required.
 ```
 
-In case you don't need FTP upload than comment the `ftp_upload`lines in daily and hourly runner threads sourcecode.
-
 ## Run script manually
 ```bash
 # In mesh-observer folder: activate the virtual environment
@@ -59,11 +60,28 @@ source .venv/bin/activate
 
 # Run the script for a Meshtastic device connected via serial interface (USB)
 # Change the ttyUSB0 for your connected serial device
-python3 meshtastic_observer_serial.py --dev /dev/ttyUSB0
+python3 meshtastic_observer.py --dev /dev/ttyUSB0
 
 # Run the script for a locally running meshtasticd service
 # meshtasticd service needs to be configured for logging up to level debug
 python3 meshtastic_observer.py
+
+# One-shot: regenerate the network graph (web/visualization.html) from the
+# database and exit, without connecting to a device or journal
+python3 meshtastic_observer.py -g
+
+# One-shot: regenerate the statistics site (web/index.html and charts) from
+# the database and exit
+python3 meshtastic_observer.py -s
+```
+
+## Run tests
+
+A small `pytest` suite under `tests/` regression-tests the regex-based debug log parsing
+against real captured log lines.
+```bash
+source .venv/bin/activate
+pytest tests/
 ```
 
 ## Configuration

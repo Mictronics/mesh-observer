@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS "packets" (
 	"type"	INTEGER,
 	"time"	INTEGER
 );
+CREATE INDEX IF NOT EXISTS "idx_links_seen" ON "links" ("seen");
+CREATE INDEX IF NOT EXISTS "idx_packets_time" ON "packets" ("time");
 INSERT OR REPLACE INTO "packet_types" VALUES (0,'Unkown');
 INSERT OR REPLACE INTO "packet_types" VALUES (1,'Text');
 INSERT OR REPLACE INTO "packet_types" VALUES (2,'Remote Hardware');

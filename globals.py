@@ -15,98 +15,36 @@
 # You should have received a copy of the GNU General Public License
 # along with mesh observer. If not, see http://www.gnu.org/licenses/.
 #
-class Globals:
-    """Globals class is a Singleton."""
+"""Process-wide state shared between the log-parser and scheduler threads.
 
-    __instance = None
+A module is already a singleton (Python caches it after first import), so
+plain module-level attributes replace the earlier hand-rolled Singleton class.
+"""
 
-    @staticmethod
-    def getInstance():
-        """Get an instance of the Globals class."""
-        if Globals.__instance is None:
-            Globals()
-        return Globals.__instance
-
-    def __init__(self):
-        """Constructor for the Globals CLass"""
-        if Globals.__instance is not None:
-            raise Exception("This class is a singleton")
-        else:
-            Globals.__instance = self
-        self.args = None
-        self.parser = None
-        self.lock = None
-        self.reader = None
-        self.ev_run = None
-        self.module_count = {
-            "DeviceTelemetry": 0,
-            "EnvironmentTelemetry": 0,
-            "PowerTelemetry": 0,
-            "HostMetrics": 0,
-            "AirQuality": 0,
-            "HealthTelemetry": 0,
-            "StoreForward": 0,
-            "ExternalNotificationModule": 0,
-            "admin": 0,
-            "routing": 0,
-            "traceroute": 0,
-            "position": 0,
-            "nodeinfo": 0,
-            "text msg": 0,
-            "waypoint msg": 0,
-            "startlog": None,
-            "error7": 0,
-            "decoded": 0,
-            "encrypted": 0,
-            "time": 0,
-        }
-
-    # setters
-    def setArgs(self, args):
-        """Set the args"""
-        self.args = args
-
-    def setParser(self, parser):
-        """Set the parser"""
-        self.parser = parser
-
-    def setLock(self, lock):
-        """Set the lock"""
-        self.lock = lock
-
-    def setModuleCount(self, module_count):
-        """Set the module counter"""
-        self.module_count = module_count
-
-    def setReader(self, reader):
-        """Set the reader"""
-        self.reader = reader
-
-    def setEvRunning(self, ev_running):
-        """Set the event running flag"""
-        self.ev_run = ev_running
-
-    # getters
-    def getArgs(self):
-        """Get args"""
-        return self.args
-
-    def getParser(self):
-        """Get parser"""
-        return self.parser
-
-    def getLock(self):
-        """Get the lock"""
-        return self.lock
-
-    def getModuleCount(self):
-        """Get the module counter"""
-        return self.module_count
-
-    def getReader(self):
-        """Get the reader"""
-        return self.reader
-
-    def getEvRunning(self):
-        """Get the event running flag"""
-        return self.ev_run
+args = None
+parser = None
+lock = None
+reader = None
+ev_run = None
+module_count = {
+    "DeviceTelemetry": 0,
+    "EnvironmentTelemetry": 0,
+    "PowerTelemetry": 0,
+    "HostMetrics": 0,
+    "AirQuality": 0,
+    "HealthTelemetry": 0,
+    "StoreForward": 0,
+    "ExternalNotificationModule": 0,
+    "admin": 0,
+    "routing": 0,
+    "traceroute": 0,
+    "position": 0,
+    "nodeinfo": 0,
+    "text msg": 0,
+    "waypoint msg": 0,
+    "startlog": None,
+    "error7": 0,
+    "decoded": 0,
+    "encrypted": 0,
+    "time": 0,
+}

@@ -40,8 +40,7 @@ from d3graph import d3graph, vec2adjmat
 from jinja2 import Environment, FileSystemLoader
 from matplotlib.patches import Rectangle
 
-import ftp_credentials
-from globals import Globals
+import globals as g
 from journal_reader import JournalReader
 from serial_reader import SerialReader
 
@@ -50,12 +49,42 @@ __copyright__ = "2025, (C) Michael Wolf"
 __license__ = "GPL v3+"
 __version__ = "1.0.0"
 
+DATABASE_FILE = "network.sqlite3"
+CHART_COLOR = "limegreen"
+LOCAL_TIMEZONE = "Europe/Berlin"
+
+# Match port numbers to message identifier string found in debug log.
+# There is unfortunately no standard in debug strings.
+PORT_NUMBERS = {
+    "unknown": 0,
+    "text msg": 1,
+    "remotehardware": 2,
+    "position": 3,
+    "nodeinfo": 4,
+    "routing": 5,
+    "admin": 6,
+    "waypoint msg": 8,
+    "telemetry": 67,
+    "devicetelemetry": 67,
+    "powertelemetry": 67,
+    "environmenttelemetry": 67,
+    "hostmetrics": 67,
+    "traceroute": 70,
+    "time": 3,
+}
+
+# Regular expressions matched against Meshtastic debug log lines
+REGEX_TRACEROUTE = r"([0-9abcdef]{8})[ ]?(\(([0-9.-]{0,6})dB\))?"
+REGEX_NODE_INFO = r"user[\s]([\w\W\s]*?), id=0x([0-9abcdef]{8})"
+REGEX_POSITION = r"POSITION node=(?P<id>[0-9abcdef]{8}).*lat=(?P<lat>[0-9]+).*lon=(?P<lon>[0-9]+)"
+REGEX_PACKET_RX = r"Received (?P<type>[A-Za-z ]+) from=(?P<from>[0-9abcdefx]+)[ ,a-z=]+[0-9abcdefx]+[ ,a-z=]+(?P<port_num>[0-9abcdefx]+)"
+REGEX_DECODING = r"(?P<decoding>decoded message|no PSK)"
+REGEX_ROLE = r"Role (?P<id>[0-9abcdef]{8}) = (?P<role>[0-9]+), HW = (?P<hw>[0-9]+)"
+
 
 def initArgParser():
     """Initialize the command line argument parsing."""
-    _globals = Globals.getInstance()
-    parser = _globals.getParser()
-    args = _globals.getArgs()
+    parser = g.parser
 
     parser.add_argument(
         "--dev",
@@ -85,80 +114,87 @@ def initArgParser():
     parser.set_defaults(deprecated=None)
     parser.add_argument("--version", action="version", version=f"{__version__}")
 
-    args = parser.parse_args()
-    _globals.setArgs(args)
-    _globals.setParser(parser)
+    g.args = parser.parse_args()
 
 
 def ftp_upload(hourly=False):
     """Upload generated web content via FTP to remote server."""
-    ftp_server = ftplib.FTP_TLS(
-        ftp_credentials.__hostname__,
-        ftp_credentials.__username__,
-        ftp_credentials.__password__,
-        timeout=5,
-    )
-    ftp_server.encoding = "utf-8"
-    # Change to the target remote folder, creating it first if it doesn't exist yet
+    reader = g.reader
     try:
-        ftp_server.cwd(ftp_credentials.__remote_folder__)
-    except Exception:
-        ftp_server.mkd(ftp_credentials.__remote_folder__)
-        ftp_server.cwd(ftp_credentials.__remote_folder__)
+        # Imported lazily: ftp_credentials.py is a hand-written, gitignored file
+        # that only needs to exist when FTP upload is actually used (see README).
+        # Importing it here, inside the try, means a missing file is just logged
+        # and skipped instead of crashing the caller.
+        import ftp_credentials
 
-    # Upload only hourly packet stats
-    if hourly:
-        filename = ftp_credentials.__local_folder__ + "/stats.png"
-        with open(filename, "rb") as file:
-            ftp_server.storbinary("STOR stats.png", file)
-        filename = ftp_credentials.__local_folder__ + "/decoding.png"
-        with open(filename, "rb") as file:
-            ftp_server.storbinary("STOR decoding.png", file)
-        ftp_server.quit()
-        return
-
-    # Upload entire web folder including sub-folders
-    for root, _dirs, files in os.walk(ftp_credentials.__local_folder__):
-        rel_path = os.path.relpath(root, ftp_credentials.__local_folder__)
-        ftp_path = os.path.join(ftp_credentials.__remote_folder__, rel_path).replace(
-            "\\", "/"
+        ftp_server = ftplib.FTP_TLS(
+            ftp_credentials.__hostname__,
+            ftp_credentials.__username__,
+            ftp_credentials.__password__,
+            timeout=5,
         )
-
-        # Ensure remote directory exists
+        ftp_server.encoding = "utf-8"
+        # Change to the target remote folder, creating it first if it doesn't exist yet
         try:
-            ftp_server.cwd(ftp_path)
+            ftp_server.cwd(ftp_credentials.__remote_folder__)
         except Exception:
-            # Create intermediate directories
-            parts = ftp_path.strip("/").split("/")
-            curr_path = ""
-            for part in parts:
-                curr_path += "/" + part
-                try:
-                    ftp_server.cwd(curr_path)
-                except Exception:
-                    ftp_server.mkd(curr_path)
-                    ftp_server.cwd(curr_path)
+            ftp_server.mkd(ftp_credentials.__remote_folder__)
+            ftp_server.cwd(ftp_credentials.__remote_folder__)
 
-        # Upload files in the current directory
-        for filename in files:
-            local_file = os.path.join(root, filename)
-            remote_file = filename
-            with open(local_file, "rb") as f:
-                ftp_server.storbinary(f"STOR {remote_file}", f)
+        # Upload only hourly packet stats
+        if hourly:
+            filename = ftp_credentials.__local_folder__ + "/stats.png"
+            with open(filename, "rb") as file:
+                ftp_server.storbinary("STOR stats.png", file)
+            filename = ftp_credentials.__local_folder__ + "/decoding.png"
+            with open(filename, "rb") as file:
+                ftp_server.storbinary("STOR decoding.png", file)
+            ftp_server.quit()
+            return
 
-    ftp_server.quit()
+        # Upload entire web folder including sub-folders
+        for root, _dirs, files in os.walk(ftp_credentials.__local_folder__):
+            rel_path = os.path.relpath(root, ftp_credentials.__local_folder__)
+            ftp_path = os.path.join(
+                ftp_credentials.__remote_folder__, rel_path
+            ).replace("\\", "/")
+
+            # Ensure remote directory exists
+            try:
+                ftp_server.cwd(ftp_path)
+            except Exception:
+                # Create intermediate directories
+                parts = ftp_path.strip("/").split("/")
+                curr_path = ""
+                for part in parts:
+                    curr_path += "/" + part
+                    try:
+                        ftp_server.cwd(curr_path)
+                    except Exception:
+                        ftp_server.mkd(curr_path)
+                        ftp_server.cwd(curr_path)
+
+            # Upload files in the current directory
+            for filename in files:
+                local_file = os.path.join(root, filename)
+                remote_file = filename
+                with open(local_file, "rb") as f:
+                    ftp_server.storbinary(f"STOR {remote_file}", f)
+
+        ftp_server.quit()
+    except Exception as e:
+        reader.log(f"FTP upload failed. Error: {e}", level=reader.LOG_ERR)
 
 
 def statistics(hourly=False):
     """Create statistics and web content."""
-    _globals = Globals.getInstance()
-    lock = _globals.getLock()
-    reader = _globals.getReader()
+    lock = g.lock
+    reader = g.reader
     database = None
     plt.set_loglevel("WARNING")
     node_count = 0
     link_count = 0
-    module_count = _globals.getModuleCount()
+    module_count = g.module_count
     statistics = {}
     dt = datetime.datetime.now()
     now_str = dt.strftime("%d.%m.%Y %H:%M")  # Web content update time
@@ -234,18 +270,18 @@ def statistics(hourly=False):
 
             stats_plot = sns.barplot(
                 data=statistics,
-                color="limegreen",
+                color=CHART_COLOR,
                 orient="h",
             )
             df = pd.DataFrame(statistics.items())
-            sum = df[1].sum()
-            if sum == 0:  # Prevent division by zero
-                sum = 1
+            total = df[1].sum()
+            if total == 0:  # Prevent division by zero
+                total = 1
             for index, row in df.iterrows():
                 plt.text(
                     row[1],
                     index,
-                    f"{row[1]} / {(row[1] / sum) * 100:.1f}%",
+                    f"{row[1]} / {(row[1] / total) * 100:.1f}%",
                     color="black",
                     va="center",
                 )
@@ -262,19 +298,19 @@ def statistics(hourly=False):
             decoding["Verschlüsselt"] = module_count.get("encrypted", 0)
             decoding_plot = sns.barplot(
                 data=decoding,
-                color="limegreen",
+                color=CHART_COLOR,
                 orient="h",
                 width=0.4,
             )
             df = pd.DataFrame(decoding.items())
-            sum = df[1].sum()
-            if sum == 0:  # Prevent division by zero
-                sum = 1
+            total = df[1].sum()
+            if total == 0:  # Prevent division by zero
+                total = 1
             for index, row in df.iterrows():
                 plt.text(
                     row[1],
                     index,
-                    f"{row[1]} / {(row[1] / sum) * 100:.1f}%",
+                    f"{row[1]} / {(row[1] / total) * 100:.1f}%",
                     color="black",
                     va="center",
                 )
@@ -286,13 +322,12 @@ def statistics(hourly=False):
             plt.savefig(os.getcwd() + "/web/decoding.png", dpi=100, bbox_inches="tight")
             plt.close()
 
-            # Reset all counters and restart the measurement window for the next hour
+            # Reset all counters and restart the measurement window for the next hour.
+            # module_count is g.module_count itself, so mutating it in place is enough.
             for key in module_count:
                 if key != "startlog":
                     module_count[key] = 0
             module_count["startlog"] = datetime.datetime.now()
-            with lock:
-                _globals.setModuleCount(module_count)
 
         if hourly:
             # Do nothing else when called hourly
@@ -300,7 +335,7 @@ def statistics(hourly=False):
 
         with lock:
             # Fetch packet data from database
-            database = sqlite3.connect("network.sqlite3", isolation_level="DEFERRED")
+            database = sqlite3.connect(DATABASE_FILE, isolation_level="DEFERRED")
             cur = database.cursor()
             res = cur.execute(
                 "SELECT count(*) FROM nodes where seen > unixepoch(datetime('now', '-24 hours'));"
@@ -317,7 +352,7 @@ def statistics(hourly=False):
             packets["time"] = (
                 pd.to_datetime(packets["time"], unit="s")
                 .dt.tz_localize("UTC")
-                .dt.tz_convert("Europe/Berlin")
+                .dt.tz_convert(LOCAL_TIMEZONE)
             )
 
         # Set global plot parameters
@@ -353,7 +388,7 @@ def statistics(hourly=False):
         max_y = hourly_counts.index.get_loc(max_idx[0])
         max_x = hourly_counts.columns.get_loc(max_idx[1])
         plt.figure(figsize=(12, 4))
-        cmap = sns.light_palette("limegreen", n_colors=5)
+        cmap = sns.light_palette(CHART_COLOR, n_colors=5)
         hourly_plot = sns.heatmap(hourly_counts, cmap=cmap, annot=True, fmt="d")
         # Highlight the maximum value in the heatmap
         hourly_plot.add_patch(
@@ -370,7 +405,7 @@ def statistics(hourly=False):
         daily_nodes_nunique = (
             packets.groupby([packets["time"].dt.hour]).source.nunique().to_numpy()
         )
-        daily_plot = sns.barplot(data=daily_nodes_nunique, color="limegreen")
+        daily_plot = sns.barplot(data=daily_nodes_nunique, color=CHART_COLOR)
         daily_plot.set_xlabel("Stunde")
         daily_plot.set_ylabel("Knoten")
         daily_plot.set(title="Messzeitraum: " + period)
@@ -384,7 +419,7 @@ def statistics(hourly=False):
         weekly_packets = packets.groupby([packets["time"].dt.day]).type.count()
         weekly_plot = sns.barplot(
             data=weekly_packets,
-            color="limegreen",
+            color=CHART_COLOR,
             estimator="sum",
             errorbar=None,
             orient="v",
@@ -505,10 +540,9 @@ def statistics(hourly=False):
             database.close()
 
 
-def graph(all=False):
-    _globals = Globals.getInstance()
-    lock = _globals.getLock()
-    reader = _globals.getReader()
+def graph(full=False):
+    lock = g.lock
+    reader = g.reader
 
     sources = []
     destinations = []
@@ -518,9 +552,9 @@ def graph(all=False):
 
     try:
         with lock:
-            database = sqlite3.connect("network.sqlite3", isolation_level="DEFERRED")
+            database = sqlite3.connect(DATABASE_FILE, isolation_level="DEFERRED")
             cur = database.cursor()
-            if all:
+            if full:
                 res = cur.execute("select * from nodes;")
             else:
                 res = cur.execute(
@@ -533,7 +567,7 @@ def graph(all=False):
                     "seen": row[3],
                 }
 
-            if all:
+            if full:
                 res = cur.execute("select * from links;")
             else:
                 res = cur.execute(
@@ -590,36 +624,15 @@ def graph(all=False):
 
 
 def logParser():
-    # Match port numbers to message identifier string found in debug log
-    # There is unfortunately no standard in debug strings
-    port_numbers = {
-        "unknown": 0,
-        "text msg": 1,
-        "remotehardware": 2,
-        "position": 3,
-        "nodeinfo": 4,
-        "routing": 5,
-        "admin": 6,
-        "waypoint msg": 8,
-        "telemetry": 67,
-        "devicetelemetry": 67,
-        "powertelemetry": 67,
-        "environmenttelemetry": 67,
-        "hostmetrics": 67,
-        "traceroute": 70,
-        "time": 3,
-    }
-
-    _globals = Globals.getInstance()
-    lock = _globals.getLock()
-    reader = _globals.getReader()
-    ev_run = _globals.getEvRunning()
+    lock = g.lock
+    reader = g.reader
+    ev_run = g.ev_run
     if ev_run is None:
         return  # No event to run, exit the thread
 
     # Connect to database
     try:
-        database = sqlite3.connect("network.sqlite3", isolation_level="DEFERRED")
+        database = sqlite3.connect(DATABASE_FILE, isolation_level="DEFERRED")
     except Exception as e:
         reader.log(f"Connection to database failed. Error: {e}", level=reader.LOG_ERR)
         # sys.exit() would only stop this thread, not the whole program;
@@ -627,16 +640,8 @@ def logParser():
         ev_run.clear()
         return
 
-    # Regular Expressions to match with different debug log line content
-    regex_traceroute = r"([0-9abcdef]{8})[ ]?(\(([0-9.-]{0,6})dB\))?"
-    regex_node_info = r"user[\s]([\w\W\s]*?), id=0x([0-9abcdef]{8})"
-    regex_position = r"POSITION node=(?P<id>[0-9abcdef]{8}).*lat=(?P<lat>[0-9]+).*lon=(?P<lon>[0-9]+)"
-    regex_packet_rx = r"Received (?P<type>[A-Za-z ]+) from=(?P<from>[0-9abcdefx]+)[ ,a-z=]+[0-9abcdefx]+[ ,a-z=]+(?P<port_num>[0-9abcdefx]+)"
-    regex_decoding = r"(?P<decoding>decoded message|no PSK)"
-    regex_role = r"Role (?P<id>[0-9abcdef]{8}) = (?P<role>[0-9]+), HW = (?P<hw>[0-9]+)"
-
     # Keep track of each received packet type (named module in debug log)
-    module_count = _globals.getModuleCount()
+    module_count = g.module_count
     module_count["startlog"] = datetime.datetime.now()
     is_telemetry_packet = False
     telemetry_from_id = 0
@@ -652,27 +657,27 @@ def logParser():
                 break
             # Store any packet received with source ID, type and timestamp.
             # Used in a nodes packet statistics graph.
-            rx_packet = re.search(regex_packet_rx, line)
+            rx_packet = re.search(REGEX_PACKET_RX, line)
             if rx_packet is not None:
-                # This is why key in port_numbers must be lower case
-                type = rx_packet.group("type").lower()
-                if type != "routing":
+                # This is why key in PORT_NUMBERS must be lower case
+                packet_type = rx_packet.group("type").lower()
+                if packet_type != "routing":
                     telemetry_from_id = int(rx_packet.group("from"), 16)
                     # Ignore broadcast or unknown ID
                     if telemetry_from_id == 0xFFFFFFFF or telemetry_from_id == 0:
                         is_telemetry_packet = False
                         continue
-                    if type not in port_numbers.keys():
+                    if packet_type not in PORT_NUMBERS.keys():
                         reader.log(
-                            f"Unknown packet type: {type} from {telemetry_from_id}",
+                            f"Unknown packet type: {packet_type} from {telemetry_from_id}",
                             level=reader.LOG_WARNING,
                         )
 
                     else:
-                        num = port_numbers[type]
+                        num = PORT_NUMBERS[packet_type]
                         if num != 67:
                             # Handle everything except telemetry packets
-                            module_count[type] += 1
+                            module_count[packet_type] += 1
                             with lock:
                                 cur = database.cursor()
                                 data = [
@@ -688,9 +693,6 @@ def logParser():
                             is_telemetry_packet = True  # Indicate telemetry packet
                             # We need one more line to check which type of telemetry packet it is
                             continue
-                    # Save what we counted
-                    with lock:
-                        _globals.setModuleCount(module_count)
 
                 continue
 
@@ -731,7 +733,6 @@ def logParser():
                 if data is not None:
                     # Store telemetry packet in database
                     with lock:
-                        _globals.setModuleCount(module_count)
                         cur = database.cursor()
                         cur.executemany(
                             "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));",
@@ -745,19 +746,17 @@ def logParser():
                 continue
 
             # Handle decoding messages
-            decoding = re.search(regex_decoding, line)
+            decoding = re.search(REGEX_DECODING, line)
             if decoding is not None:
                 if decoding.group("decoding") == "decoded message":
                     module_count["decoded"] += 1
                 elif decoding.group("decoding") == "no PSK":
                     module_count["encrypted"] += 1
-                with lock:
-                    _globals.setModuleCount(module_count)
                 continue
 
             # Store names and ID from received node information
             # Used in mesh visualization.
-            info = re.search(regex_node_info, line)
+            info = re.search(REGEX_NODE_INFO, line)
             if info is not None:
                 hex_id = info.group(2)[-4:].upper()
                 id = int(info.group(2), 16)
@@ -787,7 +786,7 @@ def logParser():
                 continue
 
             # Store received nodes position
-            pos = re.search(regex_position, line)
+            pos = re.search(REGEX_POSITION, line)
             if pos is not None:
                 id = int(pos.group(1), 16)
                 # Ignore broadcast or unknown ID
@@ -809,7 +808,7 @@ def logParser():
                 continue
 
             # Store received node role and hardware version
-            match = re.search(regex_role, line)
+            match = re.search(REGEX_ROLE, line)
             if match is not None:
                 id = int(match.group("id"), 16)
                 # Ignore broadcast or unknown ID
@@ -833,8 +832,6 @@ def logParser():
             # Count error -7 (CRC mismatch) for reception quality statistics
             if "error=-7" in line:
                 module_count["error7"] += 1
-                with lock:
-                    _globals.setModuleCount(module_count)
                 continue
 
             # Evaluate all received trace route packets.
@@ -850,8 +847,8 @@ def logParser():
                 snr = None
                 nodes = line.split(">")
                 for n in range(len(nodes) - 1):
-                    source = re.search(regex_traceroute, nodes[n])
-                    dest = re.search(regex_traceroute, nodes[n + 1].strip())
+                    source = re.search(REGEX_TRACEROUTE, nodes[n])
+                    dest = re.search(REGEX_TRACEROUTE, nodes[n + 1].strip())
                     if dest is not None:
                         if dest.group(3) is not None:
                             snr = float(dest.group(3))
@@ -916,14 +913,13 @@ def dailyRunner():
 
 def scheduleRunner():
     """Thread running the scheduler"""
-    _globals = Globals.getInstance()
-    reader = _globals.getReader()
-    ev_run = _globals.getEvRunning()
+    reader = g.reader
+    ev_run = g.ev_run
     if ev_run is None:
         return  # No event to run, exit the thread
     schedule.every().hour.at(":10").do(hourlyRunner)
-    schedule.every().day.at("11:59:00", "Europe/Berlin").do(dailyRunner)
-    schedule.every().day.at("23:59:00", "Europe/Berlin").do(dailyRunner)
+    schedule.every().day.at("11:59:00", LOCAL_TIMEZONE).do(dailyRunner)
+    schedule.every().day.at("23:59:00", LOCAL_TIMEZONE).do(dailyRunner)
     reader.log("Scheduler started", level=reader.LOG_INFO)
     while ev_run.is_set():
         schedule.run_pending()
@@ -932,8 +928,7 @@ def scheduleRunner():
 
 def main():
     """Main program function"""
-    _globals = Globals.getInstance()
-    _globals.setLock(threading.Lock())
+    g.lock = threading.Lock()
     threads = []
     ev_run = threading.Event()
     ev_run.set()
@@ -950,12 +945,12 @@ def main():
         description="Log and visualize statistics of a Meshtastic network.",
         epilog="License GPL-3+ (C) 2025 Michael Wolf, www.mictronics.de",
     )
-    _globals.setParser(parser)
+    g.parser = parser
     initArgParser()
-    args = _globals.getArgs()
+    args = g.args
 
     if args.graph == 1:
-        graph(all=True)
+        graph(full=True)
         sys.exit(0)
 
     if args.stats == 1:
@@ -971,7 +966,7 @@ def main():
         if not reader.is_open():
             sys.exit(1)
 
-    _globals.setReader(reader)  # Store reader in globals for other threads
+    g.reader = reader  # Store reader in globals for other threads
 
     # The threads we are running
     t = threading.Thread(target=logParser, name="Log Parser")
@@ -981,7 +976,7 @@ def main():
     t.daemon = True  # Daemon thread will exit when the main program exits
     threads.append(t)
 
-    _globals.setEvRunning(ev_run)  # Store event in globals for other threads
+    g.ev_run = ev_run  # Store event in globals for other threads
 
     # Start each thread
     for t in threads:
