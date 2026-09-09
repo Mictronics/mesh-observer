@@ -39,9 +39,11 @@ import seaborn as sns
 from d3graph import d3graph, vec2adjmat
 from jinja2 import Environment, FileSystemLoader
 from matplotlib.patches import Rectangle
+from pubsub import pub
 
 import globals as g
 from journal_reader import JournalReader
+from mqtt_reader import MqttReader
 from serial_reader import SerialReader
 
 __author__ = "Michael Wolf aka Mictronics"
@@ -90,6 +92,13 @@ def initArgParser():
         "--dev",
         help="Where the serial Meshtastic device is connected to, i.e. /dev/ttyUSB0",
         default=None,
+        required=False,
+    )
+
+    parser.add_argument(
+        "--mqtt",
+        help="Connect to an MQTT broker instead of journal/serial (see mqtt_credentials.py)",
+        action="store_true",
         required=False,
     )
 
@@ -902,6 +911,217 @@ def logParser():
         database.close()
 
 
+def mqtt_topic_kind(topic):
+    """Classify an MQTT topic as a relayed channel packet or a flat self-report."""
+    suffix = topic.rsplit("/", 1)[-1]
+    if suffix in ("device", "environment", "localStats"):
+        return suffix
+    return "channel"
+
+
+def mqtt_node_id(value):
+    """Parse a Meshtastic '!hex' (or bare hex) node id string into an int."""
+    return int(value.lstrip("!"), 16)
+
+
+def classify_mqtt_telemetry(payload):
+    """Map a channel-topic telemetry payload to its synthetic port number,
+    since MQTT JSON collapses every telemetry sub-type into type="telemetry"
+    and only the fields present disambiguate which one this is.
+    """
+    if "battery_level" in payload or "uptime_seconds" in payload:
+        return 512  # Device Telemetry
+    if "voltage_ch1" in payload or "current_ch1" in payload:
+        return 513  # Power Telemetry
+    if "barometric_pressure" in payload or "temperature" in payload:
+        return 514  # Environment Telemetry
+    if "diskfree" in payload:
+        return 515  # Host Metrics
+    if "pm10_standard" in payload:
+        return 516  # Air Quality
+    if "heart_bpm" in payload:
+        return 517  # Health Telemetry
+    return 67  # Fallback: generic Telemetry (e.g. distance-sensor payloads)
+
+
+def _insert_packet(database, lock, source_id, port_num):
+    with lock:
+        cur = database.cursor()
+        cur.executemany(
+            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));",
+            [{"id": source_id, "type": port_num}],
+        )
+        database.commit()
+        cur.close()
+
+
+def _upsert_node(database, lock, node_id, shortname=None, longname=None, role=None, hw=None):
+    # role/hw default to None (not 0) so a bare "seen" touch (e.g. from a
+    # traceroute endpoint) never clobbers an already-known node's role/hardware.
+    with lock:
+        cur = database.cursor()
+        cur.executemany(
+            "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, 0, coalesce(:role, 0), coalesce(:hw, 0)) "
+            "ON CONFLICT(id) DO UPDATE SET shortname=coalesce(:shortname, shortname), "
+            "longname=coalesce(:longname, longname), seen=strftime('%s','now'), "
+            "role=coalesce(:role, role), hardware=coalesce(:hw, hardware);",
+            [{"id": node_id, "shortname": shortname, "longname": longname, "role": role, "hw": hw}],
+        )
+        database.commit()
+        cur.close()
+
+
+def _handle_channel_packet(database, lock, module_count, payload):
+    msg_type = payload.get("type", "")
+    if msg_type == "":
+        return  # Undecoded/no-PSK packet: no usable data, dropped by design.
+
+    from_id = payload.get("from")
+    if from_id is None or from_id in (0, 0xFFFFFFFF):
+        return
+
+    if msg_type == "nodeinfo":
+        info = payload.get("payload", {})
+        node_id = mqtt_node_id(info.get("id", "0"))
+        if node_id in (0, 0xFFFFFFFF):
+            return
+        _upsert_node(
+            database,
+            lock,
+            node_id,
+            shortname=info.get("shortname"),
+            longname=info.get("longname"),
+            role=info.get("role"),
+            hw=info.get("hardware"),
+        )
+        module_count["nodeinfo"] += 1
+        _insert_packet(database, lock, node_id, PORT_NUMBERS["nodeinfo"])
+
+    elif msg_type == "position":
+        info = payload.get("payload", {})
+        lat = info.get("latitude_i", 0) * 1e-7
+        lon = info.get("longitude_i", 0) * 1e-7
+        # lat=0/lon=0 means "no GPS fix"; skip to avoid overwriting a node's
+        # last known position with Null Island.
+        if lat == 0 and lon == 0:
+            return
+        with lock:
+            cur = database.cursor()
+            cur.executemany(
+                "UPDATE OR IGNORE nodes SET seen = strftime('%s','now'), latitude = :lat, longitude = :lon WHERE id = :id;",
+                [{"id": from_id, "lat": lat, "lon": lon}],
+            )
+            database.commit()
+            cur.close()
+        module_count["position"] += 1
+        _insert_packet(database, lock, from_id, PORT_NUMBERS["position"])
+
+    elif msg_type == "traceroute":
+        info = payload.get("payload", {})
+        sender = payload.get("sender")
+        # ponytail: route/route_back only carry truncated short-names or
+        # "Unknown" (e.g. "ee3d"), not resolvable node ids, so we can't
+        # reconstruct the full hop path here. Only the always-numeric
+        # from/sender endpoints are linked; a real fix needs a short-name
+        # to node-id lookup against the nodes table.
+        if sender:
+            dest_id = mqtt_node_id(sender)
+            if dest_id not in (0, 0xFFFFFFFF, from_id):
+                snr_towards = info.get("snr_towards") or []
+                snr = snr_towards[0] if snr_towards else -500
+                with lock:
+                    cur = database.cursor()
+                    cur.executemany(
+                        "INSERT OR REPLACE INTO links VALUES(:source, :destination, :snr, strftime('%s','now'));",
+                        [{"source": from_id, "destination": dest_id, "snr": snr}],
+                    )
+                    database.commit()
+                    cur.close()
+                _upsert_node(database, lock, dest_id)
+        _upsert_node(database, lock, from_id)
+        module_count["traceroute"] += 1
+        _insert_packet(database, lock, from_id, PORT_NUMBERS["traceroute"])
+
+    elif msg_type == "telemetry":
+        info = payload.get("payload", {})
+        port_num = classify_mqtt_telemetry(info)
+        counter_key = {
+            512: "DeviceTelemetry",
+            513: "PowerTelemetry",
+            514: "EnvironmentTelemetry",
+            515: "HostMetrics",
+            516: "AirQuality",
+            517: "HealthTelemetry",
+        }.get(port_num, "telemetry")
+        module_count[counter_key] = module_count.get(counter_key, 0) + 1
+        _insert_packet(database, lock, from_id, port_num)
+
+
+def _handle_self_report(database, lock, module_count, topic, port_num, counter_key):
+    # Self-report topics carry the node id in the topic path, not the payload.
+    node_id = mqtt_node_id(topic.split("/")[-2])
+    if node_id in (0, 0xFFFFFFFF):
+        return
+    module_count[counter_key] = module_count.get(counter_key, 0) + 1
+    _insert_packet(database, lock, node_id, port_num)
+
+
+def mqttListener():
+    """Thread body for the --mqtt run mode. MqttReader/paho does the actual
+    network I/O on its own thread; this thread just registers the pypubsub
+    handler and idles until told to stop.
+    """
+    lock = g.lock
+    reader = g.reader
+    ev_run = g.ev_run
+    if ev_run is None:
+        return
+
+    try:
+        # check_same_thread=False: the handler below runs on paho's internal
+        # network thread (where MqttReader publishes each message), not this
+        # one. Writes are still serialized through g.lock like every other
+        # DB access in this codebase.
+        database = sqlite3.connect(
+            DATABASE_FILE, isolation_level="DEFERRED", check_same_thread=False
+        )
+    except Exception as e:
+        reader.log(f"Connection to database failed. Error: {e}", level=reader.LOG_ERR)
+        ev_run.clear()
+        return
+
+    module_count = g.module_count
+    module_count["startlog"] = datetime.datetime.now()
+
+    def handle_mqtt_message(topic, payload):
+        try:
+            kind = mqtt_topic_kind(topic)
+            if kind == "channel":
+                _handle_channel_packet(database, lock, module_count, payload)
+            elif kind == "device":
+                _handle_self_report(database, lock, module_count, topic, 512, "DeviceTelemetry")
+            elif kind == "environment":
+                _handle_self_report(database, lock, module_count, topic, 514, "EnvironmentTelemetry")
+            elif kind == "localStats":
+                # No matching packet_types entry for link-quality/queue stats;
+                # fall back to the generic Telemetry port rather than
+                # inventing a new port number.
+                _handle_self_report(database, lock, module_count, topic, 67, "telemetry")
+        except Exception as e:
+            reader.log(f"Failed handling MQTT message on {topic}: {e}", level=reader.LOG_WARNING)
+
+    pub.subscribe(handle_mqtt_message, "mqtt.message")
+    reader.log(
+        f"MQTT listener started as {reader.__class__.__name__}", level=reader.LOG_INFO
+    )
+
+    while ev_run.is_set():
+        time.sleep(1)  # Actual work happens in handle_mqtt_message above.
+
+    pub.unsubscribe(handle_mqtt_message, "mqtt.message")
+    database.close()
+
+
 def hourlyRunner():
     """Job running every hour"""
     statistics(hourly=True)
@@ -961,19 +1181,39 @@ def main():
         statistics()
         sys.exit(0)
 
-    if args.dev is None:
+    if args.mqtt and args.dev is not None:
+        print("--mqtt and --dev are mutually exclusive", file=sys.stderr)
+        sys.exit(1)
+
+    if args.mqtt:
+        # Connect to an MQTT broker publishing Meshtastic JSON packets
+        import mqtt_credentials
+
+        reader = MqttReader(
+            mqtt_credentials.__broker__,
+            mqtt_credentials.__port__,
+            mqtt_credentials.__username__,
+            mqtt_credentials.__password__,
+            mqtt_credentials.__topic__,
+        )
+        if not reader.is_open():
+            sys.exit(1)
+        parser_target = mqttListener
+    elif args.dev is None:
         # Connect to system journal that provides the Meshtasticd debug log
         reader = JournalReader("meshtasticd.service")
+        parser_target = logParser
     else:
         # Connect to Meshtastic device via serial port
         reader = SerialReader(args.dev)
         if not reader.is_open():
             sys.exit(1)
+        parser_target = logParser
 
     g.reader = reader  # Store reader in globals for other threads
 
     # The threads we are running
-    t = threading.Thread(target=logParser, name="Log Parser")
+    t = threading.Thread(target=parser_target, name="Log Parser")
     t.daemon = True  # Daemon thread will exit when the main program exits
     threads.append(t)
     t = threading.Thread(target=scheduleRunner, name="Scheduler")

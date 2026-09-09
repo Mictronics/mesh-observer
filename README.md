@@ -53,6 +53,21 @@ __remote_folder__ = "/"
 # Change above credentials and remote folder as required.
 ```
 
+## Create MQTT credentials
+
+MQTT is an alternative to the serial/journal readers: it subscribes to a broker publishing
+Meshtastic JSON packets (e.g. `msh/2/json/#`) instead of tailing a local node's debug log.
+Create a Python file named `mqtt_credentials.py` with the following content.
+```python
+__broker__ = "mqtt broker hostname"
+__port__ = 1883
+__username__ = "mqtt username"
+__password__ = "mqtt password"
+__topic__ = "msh/2/json/#"
+
+# Change above credentials, port and topic filter as required.
+```
+
 ## Run script manually
 ```bash
 # In mesh-observer folder: activate the virtual environment
@@ -65,6 +80,9 @@ python3 meshtastic_observer.py --dev /dev/ttyUSB0
 # Run the script for a locally running meshtasticd service
 # meshtasticd service needs to be configured for logging up to level debug
 python3 meshtastic_observer.py
+
+# Run the script against an MQTT broker instead (see mqtt_credentials.py above)
+python3 meshtastic_observer.py --mqtt
 
 # One-shot: regenerate the network graph (web/visualization.html) from the
 # database and exit, without connecting to a device or journal

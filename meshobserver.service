@@ -1,6 +1,6 @@
 [Unit]
 Description=Meshtastic mesh observer
-After=network-online.target
+After=network-online.target mosquitto.service
 StartLimitInterval=200
 StartLimitBurst=5
 
