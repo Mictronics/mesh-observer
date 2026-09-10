@@ -64,8 +64,11 @@ __port__ = 1883
 __username__ = "mqtt username"
 __password__ = "mqtt password"
 __topic__ = "msh/2/json/#"
+__node_id__ = ""  # own node's hex id, e.g. "6d91908f" (no leading '!'); leave empty to disable filtering
 
 # Change above credentials, port and topic filter as required.
+# __node_id__ filters out this node's own device/environment/localStats self-reports
+# (connection-status noise, not real mesh traffic) from msh/2/json/<node_id>/<kind> topics.
 ```
 
 ## Run script manually

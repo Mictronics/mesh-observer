@@ -1057,10 +1057,10 @@ def _handle_channel_packet(database, lock, module_count, payload):
         _insert_packet(database, lock, from_id, port_num)
 
 
-def _handle_self_report(database, lock, module_count, topic, port_num, counter_key):
+def _handle_self_report(database, lock, module_count, topic, port_num, counter_key, own_node_id=None):
     # Self-report topics carry the node id in the topic path, not the payload.
     node_id = mqtt_node_id(topic.split("/")[-2])
-    if node_id in (0, 0xFFFFFFFF):
+    if node_id in (0, 0xFFFFFFFF) or node_id == own_node_id:
         return
     module_count[counter_key] = module_count.get(counter_key, 0) + 1
     _insert_packet(database, lock, node_id, port_num)
@@ -1093,20 +1093,31 @@ def mqttListener():
     module_count = g.module_count
     module_count["startlog"] = datetime.datetime.now()
 
+    import mqtt_credentials
+
+    own_node_id_str = getattr(mqtt_credentials, "__node_id__", "")
+    own_node_id = mqtt_node_id(own_node_id_str) if own_node_id_str else None
+
     def handle_mqtt_message(topic, payload):
         try:
             kind = mqtt_topic_kind(topic)
             if kind == "channel":
                 _handle_channel_packet(database, lock, module_count, payload)
             elif kind == "device":
-                _handle_self_report(database, lock, module_count, topic, 512, "DeviceTelemetry")
+                _handle_self_report(
+                    database, lock, module_count, topic, 512, "DeviceTelemetry", own_node_id
+                )
             elif kind == "environment":
-                _handle_self_report(database, lock, module_count, topic, 514, "EnvironmentTelemetry")
+                _handle_self_report(
+                    database, lock, module_count, topic, 514, "EnvironmentTelemetry", own_node_id
+                )
             elif kind == "localStats":
                 # No matching packet_types entry for link-quality/queue stats;
                 # fall back to the generic Telemetry port rather than
                 # inventing a new port number.
-                _handle_self_report(database, lock, module_count, topic, 67, "telemetry")
+                _handle_self_report(
+                    database, lock, module_count, topic, 67, "telemetry", own_node_id
+                )
         except Exception as e:
             reader.log(f"Failed handling MQTT message on {topic}: {e}", level=reader.LOG_WARNING)
 

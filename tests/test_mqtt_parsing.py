@@ -5,6 +5,9 @@ Fixtures are JSON payloads copied verbatim from a real captured MQTT session
 tested here -- no real MQTT connection or database is involved.
 """
 
+import sqlite3
+import threading
+
 import meshtastic_observer as mo
 
 
@@ -74,3 +77,31 @@ class TestTelemetryClassification:
     def test_unrecognized_payload_falls_back_to_generic_telemetry(self):
         # Real sample: a distance-sensor-like payload with no matching keys.
         assert mo.classify_mqtt_telemetry({"distance": 4500}) == 67
+
+
+class TestSelfReportOwnNodeFilter:
+    def _run(self, topic, own_node_id):
+        database = sqlite3.connect(":memory:")
+        database.execute("CREATE TABLE packets (source INTEGER, type INTEGER, time INTEGER)")
+        counts = {}
+        mo._handle_self_report(
+            database, threading.Lock(), counts, topic, 512, "DeviceTelemetry", own_node_id
+        )
+        rows = database.execute("SELECT source FROM packets").fetchall()
+        database.close()
+        return counts, rows
+
+    def test_own_node_self_report_is_dropped(self):
+        counts, rows = self._run("msh/2/json/6d91908f/device", mo.mqtt_node_id("6d91908f"))
+        assert rows == []
+        assert counts == {}
+
+    def test_other_node_self_report_is_kept(self):
+        counts, rows = self._run("msh/2/json/17819f35/device", mo.mqtt_node_id("6d91908f"))
+        assert counts == {"DeviceTelemetry": 1}
+        assert len(rows) == 1
+
+    def test_no_own_node_configured_keeps_everything(self):
+        counts, rows = self._run("msh/2/json/6d91908f/device", None)
+        assert counts == {"DeviceTelemetry": 1}
+        assert len(rows) == 1
