@@ -43,7 +43,6 @@ module_count = {
     "text msg": 0,
     "waypoint msg": 0,
     "startlog": None,
-    "error7": 0,
     "decoded": 0,
     "encrypted": 0,
     "time": 0,

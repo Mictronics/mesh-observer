@@ -221,7 +221,6 @@ def statistics(hourly=False):
                 ("External Notification", "ExternalNotificationModule"),
                 ("Air Quality", "AirQuality"),
                 ("Admin", "admin"),
-                ("Error7", "error7"),
             ]
             for label, key in STAT_LABELS:
                 statistics[label] = math.ceil((module_count[key] / diff_sec) * 60 * 60)
