@@ -1,17 +1,19 @@
 # Meshtastic Observer
 
-A Python script that is monitoring a (via serial interface) connected Meshtastic node or a local running, native meshtasticd service through the system journal.
-
-The monitoring is purely passive by line parsing the nodes debug log. No Meshtastic API is used and no packets are transmitted.
+A Python script that connects to a Meshtastic node's TCP API, logs the mesh traffic it sees into
+a SQLite database, and generates statistics/network-graph web content from it -- the same job it
+always did. Since firmware 2.8.x removed MQTT JSON publishing, this is now also the only client
+allowed to hold that node's TCP connection (the node's API accepts one client at a time), so it
+additionally repeats that connection out over both the TCP and HTTP Meshtastic API surfaces to any
+other client that needs live mesh data (`meshtastic2hass`, `meshtastic-powered-vue`, ...). This is
+a deliberate exception to the project's earlier "never uses the Meshtastic API" design -- see
+CLAUDE.md.
 
 ## Installation
 
 Run the following commands for repository cloning, creation of a Python virtual environment and installation of dependencies.
 
 ```bash
-# Install dependencies
-sudo apt install libsystemd-journal-dev
-
 # Clone repository
 git clone https://github.com/Mictronics/mesh-observer.git
 
@@ -53,42 +55,38 @@ __remote_folder__ = "/"
 # Change above credentials and remote folder as required.
 ```
 
-## Create MQTT credentials
+## Create TCP credentials
 
-MQTT is an alternative to the serial/journal readers: it subscribes to a broker publishing
-Meshtastic JSON packets (e.g. `msh/2/json/#`) instead of tailing a local node's debug log.
-Create a Python file named `mqtt_credentials.py` with the following content.
+Create a Python file named `tcp_credentials.py` pointing at the Meshtastic node's TCP API, and
+picking the ports this app's own repeater binds to for other Meshtastic clients:
 ```python
-__broker__ = "mqtt broker hostname"
-__port__ = 1883
-__username__ = "mqtt username"
-__password__ = "mqtt password"
-__topic__ = "msh/2/json/#"
-__node_id__ = ""  # own node's hex id, e.g. "6d91908f" (no leading '!'); leave empty to disable filtering
+__hostname__ = "192.168.1.100"  # the node's IP or hostname
+__port__ = 4403                 # the node's real TCP API port
 
-# Change above credentials, port and topic filter as required.
-# __node_id__ filters out this node's own device/environment/localStats self-reports
-# (connection-status noise, not real mesh traffic) from msh/2/json/<node_id>/<kind> topics.
+__repeater_tcp_port__ = 4403    # this app's own TCP repeater (meshtastic2hass, etc.)
+__repeater_http_port__ = 4404   # this app's own HTTP repeater (meshtastic-powered-vue, etc.)
+
+# __repeater_http_port__ defaults away from 80 so the service doesn't need
+# root/CAP_NET_BIND_SERVICE -- point browser clients at "<this-host>:4404",
+# not a bare hostname.
 ```
+
+Only one client can hold the node's own TCP API connection at a time -- this app is meant to be
+that one client. Anything else that needs live Meshtastic data (an app using
+`meshtastic.tcp_interface.TCPInterface`, or a browser app using `@meshtastic/transport-http`)
+should point at *this app's* repeater ports instead of the node directly.
 
 ## Run script manually
 ```bash
 # In mesh-observer folder: activate the virtual environment
 source .venv/bin/activate
 
-# Run the script for a Meshtastic device connected via serial interface (USB)
-# Change the ttyUSB0 for your connected serial device
-python3 meshtastic_observer.py --dev /dev/ttyUSB0
-
-# Run the script for a locally running meshtasticd service
-# meshtasticd service needs to be configured for logging up to level debug
+# Connects to the node (tcp_credentials.py above), writes to the database, and
+# serves both repeater ports for other Meshtastic clients until stopped
 python3 meshtastic_observer.py
 
-# Run the script against an MQTT broker instead (see mqtt_credentials.py above)
-python3 meshtastic_observer.py --mqtt
-
 # One-shot: regenerate the network graph (web/visualization.html) from the
-# database and exit, without connecting to a device or journal
+# database and exit, without connecting to the node
 python3 meshtastic_observer.py -g
 
 # One-shot: regenerate the statistics site (web/index.html and charts) from
@@ -98,41 +96,11 @@ python3 meshtastic_observer.py -s
 
 ## Run tests
 
-A small `pytest` suite under `tests/` regression-tests the regex-based debug log parsing
-against real captured log lines.
+A small `pytest` suite under `tests/` regression-tests the packet-to-database-write logic
+against synthetic packets shaped like real decoded Meshtastic traffic.
 ```bash
 source .venv/bin/activate
 pytest tests/
-```
-
-## Configuration
-
-Configuration of the systemd journal and meshtasticd native service is required when running on Linux.
-
-meshtasticd native service will create a hugh journal log when the debug level is configured. Therefore the journal will be stored in memory and size limited to avoid excessive disk usage.
-
-```bash
-# Open the journal daemon configuration
-sudo nano /etc/systemd/journald.conf
-
-# Uncomment and change at least the following two lines
-# Journal is stored in volatile memory
-# Limit size to 48 MByte during runtime
-[Journal]
-Storage=volatile
-RuntimeMaxUse=48M
-
-# Adjust limit as desired
-```
-
-Activate the debug level log in journal for meshtasticd native service.
-```bash
-# Open meschtasticd configuration
-sudo nano /etc/meshtasticd/config.yaml
-
-# Set log level to debug
-Logging:
-  LogLevel: debug # debug, info, warn, error
 ```
 
 ## Create systemd service
