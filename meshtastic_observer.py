@@ -394,6 +394,47 @@ def statistics(hourly=False):
         plt.savefig(os.getcwd() + "/web/weekly.png", dpi=100, bbox_inches="tight")
         plt.close()
 
+        # Create hop-count distribution graph (mesh diameter indicator)
+        hops = packets["hops_used"].dropna()
+        if not hops.empty:
+            hop_counts = hops.value_counts().sort_index()
+            plt.figure(figsize=(6, 4))
+            hops_plot = sns.barplot(
+                x=hop_counts.index.astype(int), y=hop_counts.values, color=CHART_COLOR
+            )
+            hops_plot.set_xlabel("Anzahl Hops")
+            hops_plot.set_ylabel("Packete")
+            hops_plot.set(title="Messzeitraum: " + period)
+            hops_plot.figure.suptitle("Hop-Verteilung im Mesh")
+            plt.savefig(os.getcwd() + "/web/hops.png", dpi=100, bbox_inches="tight")
+            plt.close()
+
+        # Create channel/airtime utilization per node graph (congestion indicator)
+        airtime = packets.dropna(subset=["air_util_tx"]).groupby("longname")["air_util_tx"].mean().sort_values(
+            ascending=False
+        )
+        if not airtime.empty:
+            plt.figure(figsize=(8, max(4, 0.3 * len(airtime))))
+            airtime_plot = sns.barplot(x=airtime.values, y=airtime.index, color=CHART_COLOR, orient="h")
+            airtime_plot.set_xlabel("Kanalauslastung TX (%)")
+            airtime_plot.set_ylabel("Knoten")
+            airtime_plot.set(title="Messzeitraum: " + period)
+            airtime_plot.figure.suptitle("Kanalauslastung (Airtime) pro Knoten")
+            plt.savefig(os.getcwd() + "/web/airtime.png", dpi=100, bbox_inches="tight")
+            plt.close()
+
+        # Create average RX SNR per node graph (weak-link indicator, worst first)
+        snr = packets.dropna(subset=["rx_snr"]).groupby("longname")["rx_snr"].mean().sort_values()
+        if not snr.empty:
+            plt.figure(figsize=(8, max(4, 0.3 * len(snr))))
+            snr_plot = sns.barplot(x=snr.values, y=snr.index, color=CHART_COLOR, orient="h")
+            snr_plot.set_xlabel("Ø SNR (dB)")
+            snr_plot.set_ylabel("Knoten")
+            snr_plot.set(title="Messzeitraum: " + period)
+            snr_plot.figure.suptitle("Empfangsqualität pro Knoten (SNR)")
+            plt.savefig(os.getcwd() + "/web/snr.png", dpi=100, bbox_inches="tight")
+            plt.close()
+
         # Create packet statistics graph for each node
         for node, node_packets in packets.groupby(["source", "longname"]):
             node_id = node[0]
@@ -582,12 +623,24 @@ def graph(full=False):
             database.close()
 
 
-def _insert_packet(database, lock, source_id, port_num):
+def _insert_packet(
+    database, lock, source_id, port_num, hops_used=None, rx_snr=None, rx_rssi=None, channel_util=None, air_util_tx=None
+):
     with lock:
         cur = database.cursor()
         cur.executemany(
-            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));",
-            [{"id": source_id, "type": port_num}],
+            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'), :hops_used, :rx_snr, :rx_rssi, :channel_util, :air_util_tx);",
+            [
+                {
+                    "id": source_id,
+                    "type": port_num,
+                    "hops_used": hops_used,
+                    "rx_snr": rx_snr,
+                    "rx_rssi": rx_rssi,
+                    "channel_util": channel_util,
+                    "air_util_tx": air_util_tx,
+                }
+            ],
         )
         database.commit()
         cur.close()
@@ -657,6 +710,16 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
     )
     portnum = decoded.get("portnum", "")
 
+    # hopStart/hopLimit/rxSnr/rxRssi live on the MeshPacket envelope itself
+    # (not inside `decoded`), and are set by our own node's radio for
+    # whichever hop last relayed the packet to us -- available regardless of
+    # port type, so extracted once here rather than per-branch.
+    hop_start = packet.get("hopStart")
+    hop_limit = packet.get("hopLimit")
+    hops_used = hop_start - hop_limit if hop_start is not None and hop_limit is not None else None
+    rx_snr = packet.get("rxSnr")
+    rx_rssi = packet.get("rxRssi")
+
     if portnum == "NODEINFO_APP":
         user = decoded.get("user", {})
         _upsert_node(
@@ -670,7 +733,7 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
         )
         module_count["nodeinfo"] += 1
         if not is_own:
-            _insert_packet(database, lock, from_id, PORT_NUM_NODEINFO)
+            _insert_packet(database, lock, from_id, PORT_NUM_NODEINFO, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "POSITION_APP":
         position = decoded.get("position", {})
@@ -689,7 +752,7 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                 cur.close()
         module_count["position"] += 1
         if not is_own:
-            _insert_packet(database, lock, from_id, PORT_NUM_POSITION)
+            _insert_packet(database, lock, from_id, PORT_NUM_POSITION, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "TRACEROUTE_APP":
         traceroute = decoded.get("traceroute", {})
@@ -718,28 +781,40 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
         _upsert_node(database, lock, from_id)
         module_count["traceroute"] += 1
         if not is_own:
-            _insert_packet(database, lock, from_id, PORT_NUM_TRACEROUTE)
+            _insert_packet(database, lock, from_id, PORT_NUM_TRACEROUTE, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "TELEMETRY_APP":
-        port_num, counter_key = _classify_telemetry(decoded.get("telemetry", {}))
+        telemetry = decoded.get("telemetry", {})
+        port_num, counter_key = _classify_telemetry(telemetry)
         module_count[counter_key] = module_count.get(counter_key, 0) + 1
         if not is_own:
-            _insert_packet(database, lock, from_id, port_num)
+            device_metrics = telemetry.get("deviceMetrics", {})
+            _insert_packet(
+                database,
+                lock,
+                from_id,
+                port_num,
+                hops_used=hops_used,
+                rx_snr=rx_snr,
+                rx_rssi=rx_rssi,
+                channel_util=device_metrics.get("channelUtilization"),
+                air_util_tx=device_metrics.get("airUtilTx"),
+            )
 
     elif portnum == "TEXT_MESSAGE_APP":
         module_count["text msg"] += 1
         if not is_own:
-            _insert_packet(database, lock, from_id, PORT_NUM_TEXT)
+            _insert_packet(database, lock, from_id, PORT_NUM_TEXT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "WAYPOINT_APP":
         module_count["waypoint msg"] += 1
         if not is_own:
-            _insert_packet(database, lock, from_id, PORT_NUM_WAYPOINT)
+            _insert_packet(database, lock, from_id, PORT_NUM_WAYPOINT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "ADMIN_APP":
         module_count["admin"] += 1
         if not is_own:
-            _insert_packet(database, lock, from_id, PORT_NUM_ADMIN)
+            _insert_packet(database, lock, from_id, PORT_NUM_ADMIN, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
 
 def tcpListener():

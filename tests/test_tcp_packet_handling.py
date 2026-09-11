@@ -27,7 +27,11 @@ def make_db():
             latitude REAL, longitude REAL, tracestart INTEGER DEFAULT 0,
             role INTEGER DEFAULT 0, hardware INTEGER DEFAULT 0, PRIMARY KEY(id)
         );
-        CREATE TABLE packets (source INTEGER, type INTEGER, time INTEGER);
+        CREATE TABLE packets (
+            source INTEGER, type INTEGER, time INTEGER,
+            hops_used INTEGER, rx_snr REAL, rx_rssi INTEGER,
+            channel_util REAL, air_util_tx REAL
+        );
         """
     )
     return db
@@ -187,3 +191,37 @@ class TestHandleTcpPacket:
         counts = handle(db, {"from": 1})
         assert counts["encrypted"] == 1
         assert db.execute("SELECT count(*) FROM packets").fetchone()[0] == 0
+
+    def test_hop_snr_rssi_extracted_from_envelope_not_decoded(self):
+        db = make_db()
+        packet = {
+            "from": 1,
+            "hopStart": 5,
+            "hopLimit": 2,
+            "rxSnr": 7.25,
+            "rxRssi": -95,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP"},
+        }
+        handle(db, packet)
+        row = db.execute("SELECT hops_used, rx_snr, rx_rssi FROM packets").fetchone()
+        assert row == (3, 7.25, -95)
+
+    def test_missing_hop_fields_leave_hops_used_null(self):
+        db = make_db()
+        packet = {"from": 1, "decoded": {"portnum": "TEXT_MESSAGE_APP"}}
+        handle(db, packet)
+        row = db.execute("SELECT hops_used, rx_snr, rx_rssi FROM packets").fetchone()
+        assert row == (None, None, None)
+
+    def test_device_telemetry_stores_channel_and_airtime_utilization(self):
+        db = make_db()
+        packet = {
+            "from": 1,
+            "decoded": {
+                "portnum": "TELEMETRY_APP",
+                "telemetry": {"deviceMetrics": {"channelUtilization": 12.5, "airUtilTx": 3.4}},
+            },
+        }
+        handle(db, packet)
+        row = db.execute("SELECT type, channel_util, air_util_tx FROM packets").fetchone()
+        assert row == (512, 12.5, 3.4)

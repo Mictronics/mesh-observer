@@ -26,7 +26,12 @@ CREATE TABLE IF NOT EXISTS "packet_types" (
 CREATE TABLE IF NOT EXISTS "packets" (
 	"source"	INTEGER,
 	"type"	INTEGER,
-	"time"	INTEGER
+	"time"	INTEGER,
+	"hops_used"	INTEGER,
+	"rx_snr"	REAL,
+	"rx_rssi"	INTEGER,
+	"channel_util"	REAL,
+	"air_util_tx"	REAL
 );
 CREATE INDEX IF NOT EXISTS "idx_links_seen" ON "links" ("seen");
 CREATE INDEX IF NOT EXISTS "idx_packets_time" ON "packets" ("time");
@@ -68,7 +73,7 @@ INSERT OR REPLACE INTO "packet_types" VALUES (515,'Host Metrics');
 INSERT OR REPLACE INTO "packet_types" VALUES (516,'Air Quality');
 INSERT OR REPLACE INTO "packet_types" VALUES (517,'Health Telemetry');
 CREATE VIEW ViewPackets AS
-SELECT source, longname, type, port_name, time, role FROM packets AS p
+SELECT source, longname, type, port_name, time, role, hops_used, rx_snr, rx_rssi, channel_util, air_util_tx FROM packets AS p
 INNER JOIN packet_types ON packet_types.port_num = p.type
 INNER JOIN nodes ON nodes.id = p.source;
 CREATE TRIGGER delete_old_links

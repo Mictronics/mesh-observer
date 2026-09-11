@@ -41,8 +41,7 @@
     <h1 class="display-6">Bayern Mesh</h1>
     <p class="lead">Das Meshtastic Netzwerk in Bayern, empfangen in Donauwörth.</p>
     <p>
-        Der Knoten <em>OP03 NFN-866#9 Mesh Observer</em> ist für die Datenerfassung zuständig.
-        <a href="https://www.mictronics.de/posts/Meshtastic-DietPi-OrangePi-Zero3/" target="_blank" class="link-secondary">Info</a>
+        Der Knoten <em>NFN-866#9 Base</em> ist für die Datenerfassung zuständig.
     </p>
     <div class="vstack">
         <div class="p-1">Letzte Aktualisierung: {{ last_update }} (zweimal pro Tag)</div>
@@ -50,7 +49,7 @@
         <div class="p-1">Aktive Verbindungen in 24h: {{ link_count }}</div>
         <div class="p-1">Messzeitraum: {{ period }} (7 Tage, gleitend)</div>
         <div class="p-1">Packete gesamt: {{ total_packets }}</div>
-        <div class="p-1">Modem Voreinstellung: LongFast</div>
+        <div class="p-1">Modem Voreinstellung: MediumFast</div>
     </div>
 
     <div class="container float-start">
@@ -69,12 +68,21 @@
         fehlt der private Schlüssel (PSK) oder die Packete sind als Direktnachricht (DM) verschlüsselt.</p>
         <img src="weekly.png" class="img-fluid" alt="Anzahl der Packete pro Tag im Messzeitraum">
         <p>Die Grafik zeigt die Anzahl der empfangenen Packete pro Tag im Messzeitraum, unabhängig vom Typ.</p>
-        <img src="daily.png" class="img-fluid" alt="Verteilung eindeutige Knoten über die Tageszeit im Messzeitraum">    
+        <img src="daily.png" class="img-fluid" alt="Verteilung eindeutige Knoten über die Tageszeit im Messzeitraum">
         <p>Die Grafik zeigt die Verteilung eindeutiger, aktiver Knoten über die Tageszeit im gesamten Messzeitraum.
            Die rote Linie bei 40 Knoten bezieht sich auf die eingebaute Skalierungsfunktion, die seit der Software
            Version 2.4.0. Damit sollte der Knoten seine Aussendungen skalieren und den Intervall verlängern, falls in einem Mesh mehr als
            40 Knoten aktiv (online) sind.
            <a class="link-secondary" href="https://github.com/meshtastic/firmware/blob/2bcf608654facd685321779b339584644a1ecc5d/src/mesh/Default.h#L49" target="_blank">Siehe Berechnung.</a></p>
+        <img src="hops.png" class="img-fluid" alt="Hop-Verteilung im Mesh">
+        <p>Die Grafik zeigt, über wie viele Hops die empfangenen Packete im Messzeitraum unterwegs waren. Eine Verschiebung
+           zu mehr Hops deutet auf einen größeren oder schlechter vernetzten Mesh-Durchmesser hin.</p>
+        <img src="airtime.png" class="img-fluid" alt="Kanalauslastung (Airtime) pro Knoten">
+        <p>Die Grafik zeigt die mittlere Kanalauslastung (Airtime TX) pro Knoten im Messzeitraum, gemeldet von den Knoten
+           selbst. Hohe Werte deuten auf ein überlastetes Mesh hin.</p>
+        <img src="snr.png" class="img-fluid" alt="Empfangsqualität pro Knoten (SNR)">
+        <p>Die Grafik zeigt das mittlere SNR (Signal-Rausch-Verhältnis) pro Knoten beim letzten Hop zu diesem Empfänger,
+           sortiert vom schwächsten zum stärksten Signal. Niedrige Werte markieren Knoten mit schwacher Anbindung.</p>
         <h1 class="display-6">Top 10</h1>
         <p>Die Top 10 zeigt die Knoten mit der höchsten Packetanzahl unabhängig vom Typ und in Abhängigkeit vom Packettyp an.</p>
         <div class="row">
