@@ -88,21 +88,16 @@ def initArgParser():
         "-g",
         "--graph",
         help="Visualize the Meshtastic network from database",
-        action="count",
-        default=0,
-        required=False,
+        action="store_true",
     )
 
     parser.add_argument(
         "-s",
         "--stats",
         help="Generate the Meshtastic network statistics from database",
-        action="count",
-        default=0,
-        required=False,
+        action="store_true",
     )
 
-    parser.set_defaults(deprecated=None)
     parser.add_argument("--version", action="version", version=f"{__version__}")
 
     g.args = parser.parse_args()
@@ -212,49 +207,24 @@ def statistics(hourly=False):
             diff_sec = (
                 datetime.datetime.now() - module_count["startlog"]
             ).total_seconds()
-            statistics["Device Telemetry"] = math.ceil(
-                (module_count["DeviceTelemetry"] / diff_sec) * 60 * 60
-            )
-            statistics["Environment Telemetry"] = math.ceil(
-                (module_count["EnvironmentTelemetry"] / diff_sec) * 60 * 60
-            )
-            statistics["Host Metrics"] = math.ceil(
-                (module_count["HostMetrics"] / diff_sec) * 60 * 60
-            )
-            statistics["Store Forward"] = math.ceil(
-                (module_count["StoreForward"] / diff_sec) * 60 * 60
-            )
-            statistics["Power Telemetry"] = math.ceil(
-                (module_count["PowerTelemetry"] / diff_sec) * 60 * 60
-            )
-            statistics["Traceroute"] = math.ceil(
-                (module_count["traceroute"] / diff_sec) * 60 * 60
-            )
-            # statistics['Routing'] = math.ceil((module_count['routing'] / diff_sec) * 60 * 60)
-            statistics["Position"] = math.ceil(
-                (module_count["position"] / diff_sec) * 60 * 60
-            )
-            statistics["NodeInfo"] = math.ceil(
-                (module_count["nodeinfo"] / diff_sec) * 60 * 60
-            )
-            statistics["Text"] = math.ceil(
-                (module_count["text msg"] / diff_sec) * 60 * 60
-            )
-            statistics["Waypoint"] = math.ceil(
-                (module_count["waypoint msg"] / diff_sec) * 60 * 60
-            )
-            statistics["External Notification"] = math.ceil(
-                (module_count["ExternalNotificationModule"] / diff_sec) * 60 * 60
-            )
-            statistics["Air Quality"] = math.ceil(
-                (module_count["AirQuality"] / diff_sec) * 60 * 60
-            )
-            statistics["Admin"] = math.ceil(
-                (module_count["admin"] / diff_sec) * 60 * 60
-            )
-            statistics["Error7"] = math.ceil(
-                (module_count["error7"] / diff_sec) * 60 * 60
-            )
+            STAT_LABELS = [
+                ("Device Telemetry", "DeviceTelemetry"),
+                ("Environment Telemetry", "EnvironmentTelemetry"),
+                ("Host Metrics", "HostMetrics"),
+                ("Store Forward", "StoreForward"),
+                ("Power Telemetry", "PowerTelemetry"),
+                ("Traceroute", "traceroute"),
+                ("Position", "position"),
+                ("NodeInfo", "nodeinfo"),
+                ("Text", "text msg"),
+                ("Waypoint", "waypoint msg"),
+                ("External Notification", "ExternalNotificationModule"),
+                ("Air Quality", "AirQuality"),
+                ("Admin", "admin"),
+                ("Error7", "error7"),
+            ]
+            for label, key in STAT_LABELS:
+                statistics[label] = math.ceil((module_count[key] / diff_sec) * 60 * 60)
             statistics = dict(
                 sorted(statistics.items(), key=lambda item: item[1], reverse=True)
             )
@@ -516,8 +486,6 @@ def statistics(hourly=False):
         )
         # Save generated web content
         index_file = os.getcwd() + "/web/index.html"
-        if os.path.isfile(index_file):
-            os.remove(index_file)
         with open(index_file, "w", encoding="utf-8") as f:
             f.write(html)
 
@@ -883,11 +851,11 @@ def main():
     initArgParser()
     args = g.args
 
-    if args.graph == 1:
+    if args.graph:
         graph(full=True)
         sys.exit(0)
 
-    if args.stats == 1:
+    if args.stats:
         statistics()
         sys.exit(0)
 
@@ -898,12 +866,11 @@ def main():
     import tcp_credentials
 
     reader = TcpReader(tcp_credentials.__hostname__, tcp_credentials.__port__, ev_run)
-    parser_target = tcpListener
 
     g.reader = reader  # Store reader in globals for other threads
 
     # The threads we are running
-    t = threading.Thread(target=parser_target, name="Log Parser")
+    t = threading.Thread(target=tcpListener, name="Log Parser")
     t.daemon = True  # Daemon thread will exit when the main program exits
     threads.append(t)
     t = threading.Thread(target=scheduleRunner, name="Scheduler")

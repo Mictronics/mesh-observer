@@ -43,7 +43,12 @@ python3 meshtastic_observer.py -g
 
 # One-shot: (re)generate web/index.html + stat graphs from DB, then exit
 python3 meshtastic_observer.py -s
+
+# Print the version string (1.0.0) and exit
+python3 meshtastic_observer.py --version
 ```
+
+(`-g`/`-s` also have long forms `--graph`/`--stats`.)
 
 Create `tcp_credentials.py` (gitignored, not present in repo) exporting `__hostname__`/`__port__`
 (the node's TCP API) and `__repeater_tcp_port__`/`__repeater_http_port__` (the ports this app's own
@@ -105,7 +110,22 @@ downstream client from the shared `TCPInterface`'s already-cached state (`iface.
 `.nodesByNum`, `.localNode.channels/.localConfig/.moduleConfig` -- the Python client doesn't care
 what order handshake messages arrive in, only that `config_complete_id` eventually shows up, so
 order and completeness here are best-effort, not a strict re-implementation of the firmware's own
-ordered state machine), forwards any other `ToRadio` message straight to the upstream socket, and
+ordered state machine) -- **except one nonce, which is not best-effort**: `want_config_id ==
+SPECIAL_NONCE_ONLY_NODES` (69421, firmware `PhoneAPI.h`) must get *only* `node_info` messages, no
+`my_info`. Some clients run a two-stage handshake using this exact nonce to fetch just the node
+list (e.g. Meshtastic Android's `MeshConfigFlowManagerImpl`); their state machine resets to stage
+1 on any `my_info`, so replaying the full bundle for this nonce silently strands them mid-connect
+with no visible error. `_build_node_messages()` vs `_build_config_messages()` in `repeater_core.py`
+is this split -- don't collapse it back into one path.
+
+Admin requests (`ADMIN_APP` packets) need a per-node session passkey the real firmware issues in
+response to a specific bootstrap request; a repeater client's own synthesized handshake never goes
+through that exchange, so its admin requests would otherwise be silently rejected. `TcpReader`
+proactively bootstraps our own passkey (`ensure_admin_session_key()`), and `RepeaterCore`
+substitutes it into any downstream client's outgoing admin packet (`_rewrite_admin_passkey()`)
+before forwarding upstream.
+
+It forwards any other `ToRadio` message straight to the upstream socket, and
 fans out each live decoded packet (re-wrapping the already-parsed `MeshPacket` object, no
 hand-rolled protobuf encode/decode needed) to every connected session's queue. `tcp_repeater.py`
 is a thin `socketserver.ThreadingTCPServer` adapter speaking the real framed wire protocol (2 magic
@@ -120,6 +140,17 @@ request. Both repeater surfaces grant full read/write access to the mesh (any `T
 `want_config_id` passes through unmodified -- `sendText`, admin/config changes, everything),
 equivalent to a client plugging directly into the node; there's no additional auth layer, matching
 the node's own (unauthenticated) TCP/HTTP APIs today.
+
+**Verified working**: `meshtastic2hass` (TCP), the official Meshtastic Android app (TCP), and
+`meshtastic-powered-vue` (HTTP) all connect and operate correctly through the repeater. The HTTP
+side needs one thing outside this repo: `meshtastic-powered-vue`'s HTTP transport always calls
+`/api/v1/{from,to}radio` at the *site root* of whatever host/TLS it's given (it drops any path
+component), so if the app is served from a subpath behind a reverse proxy (e.g. nginx `alias`-ing
+`/meshtastic/` to the built site), that proxy also needs a root-level location proxying
+`/api/v1/` to this repeater's HTTP port (`__repeater_http_port__`, default 4404) -- otherwise the
+proxy answers those requests itself (404/405) instead of forwarding them, which surfaces in the
+browser console as connect failures that look CORS-related but aren't (`http_repeater.py` already
+sets the right CORS headers).
 
 **Shared state**: `globals.py`'s `Globals` is a singleton holding cross-thread state that would
 otherwise need to be threaded through every function -- the argparse parser/args, the active

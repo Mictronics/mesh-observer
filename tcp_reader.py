@@ -45,7 +45,6 @@ class TcpReader:
     LOG_DEBUG: Final = 7
     LOG_ERR: Final = 3
     LOG_INFO: Final = 6
-    LOG_NOTICE: Final = 5
     LOG_WARNING: Final = 4
 
     def __init__(self, hostname, port=4403, stop_event=None):
@@ -152,13 +151,5 @@ class TcpReader:
                 print(f"\x1b[0;31;49m{message}\x1b[0m")
             case self.LOG_INFO:
                 print(message)
-            case self.LOG_NOTICE:
-                print(f"\x1b[0;36;49m{message}\x1b[0m")
             case self.LOG_WARNING:
                 print(f"\x1b[0;33;49m{message}\x1b[0m")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()

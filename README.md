@@ -76,6 +76,12 @@ that one client. Anything else that needs live Meshtastic data (an app using
 `meshtastic.tcp_interface.TCPInterface`, or a browser app using `@meshtastic/transport-http`)
 should point at *this app's* repeater ports instead of the node directly.
 
+If the browser app is served over HTTPS (e.g. from behind an nginx reverse proxy), pointing it at
+`<this-host>:4404` directly will get blocked as mixed content. Instead, add a root-level reverse
+proxy location forwarding `/api/v1/` to `127.0.0.1:4404` (`@meshtastic/transport-http` always calls
+`/api/v1/{from,to}radio` at the site root, regardless of what subpath the app itself is served
+from), and connect the browser app to the site's own HTTPS host with no port -- see CLAUDE.md.
+
 ## Run script manually
 ```bash
 # In mesh-observer folder: activate the virtual environment
@@ -92,7 +98,12 @@ python3 meshtastic_observer.py -g
 # One-shot: regenerate the statistics site (web/index.html and charts) from
 # the database and exit
 python3 meshtastic_observer.py -s
+
+# Print the version string and exit
+python3 meshtastic_observer.py --version
 ```
+
+(`-g`/`-s` also have long forms `--graph`/`--stats`.)
 
 ## Run tests
 
