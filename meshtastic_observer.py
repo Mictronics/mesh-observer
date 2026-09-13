@@ -24,7 +24,6 @@ import datetime
 import ftplib
 import math
 import os
-import re
 import signal
 import sqlite3
 import sys
@@ -39,12 +38,14 @@ import seaborn as sns
 from d3graph import d3graph, vec2adjmat
 from jinja2 import Environment, FileSystemLoader
 from matplotlib.patches import Rectangle
+from meshtastic.protobuf import config_pb2, mesh_pb2
 from pubsub import pub
 
 import globals as g
-from journal_reader import JournalReader
-from mqtt_reader import MqttReader
-from serial_reader import SerialReader
+from http_repeater import HttpRepeaterServer
+from repeater_core import RepeaterCore
+from tcp_reader import TcpReader
+from tcp_repeater import TcpRepeaterServer
 
 __author__ = "Michael Wolf aka Mictronics"
 __copyright__ = "2025, (C) Michael Wolf"
@@ -55,33 +56,28 @@ DATABASE_FILE = "network.sqlite3"
 CHART_COLOR = "limegreen"
 LOCAL_TIMEZONE = "Europe/Berlin"
 
-# Match port numbers to message identifier string found in debug log.
-# There is unfortunately no standard in debug strings.
-PORT_NUMBERS = {
-    "unknown": 0,
-    "text msg": 1,
-    "remotehardware": 2,
-    "position": 3,
-    "nodeinfo": 4,
-    "routing": 5,
-    "admin": 6,
-    "waypoint msg": 8,
-    "telemetry": 67,
-    "devicetelemetry": 67,
-    "powertelemetry": 67,
-    "environmenttelemetry": 67,
-    "hostmetrics": 67,
-    "traceroute": 70,
-    "time": 3,
-}
+# Real Meshtastic port numbers (matches network.sqlite3.sql's packet_types
+# table), for the packet types handled directly in _handle_tcp_packet().
+PORT_NUM_TEXT = 1
+PORT_NUM_POSITION = 3
+PORT_NUM_NODEINFO = 4
+PORT_NUM_ADMIN = 6
+PORT_NUM_WAYPOINT = 8
+PORT_NUM_TRACEROUTE = 70
 
-# Regular expressions matched against Meshtastic debug log lines
-REGEX_TRACEROUTE = r"([0-9abcdef]{8})[ ]?(\(([0-9.-]{0,6})dB\))?"
-REGEX_NODE_INFO = r"user[\s]([\w\W\s]*?), id=0x([0-9abcdef]{8})"
-REGEX_POSITION = r"POSITION node=(?P<id>[0-9abcdef]{8}).*lat=(?P<lat>[0-9]+).*lon=(?P<lon>[0-9]+)"
-REGEX_PACKET_RX = r"Received (?P<type>[A-Za-z ]+) from=(?P<from>[0-9abcdefx]+)[ ,a-z=]+[0-9abcdefx]+[ ,a-z=]+(?P<port_num>[0-9abcdefx]+)"
-REGEX_DECODING = r"(?P<decoding>decoded message|no PSK)"
-REGEX_ROLE = r"Role (?P<id>[0-9abcdef]{8}) = (?P<role>[0-9]+), HW = (?P<hw>[0-9]+)"
+# Synthetic telemetry sub-type ports this project invented (see
+# network.sqlite3.sql's packet_types 512-517) to disambiguate what the real
+# protocol collapses onto the single TELEMETRY_APP port (67); keyed by which
+# oneof field is present on the decoded Telemetry message, the same
+# discriminator the meshtastic library's own _onTelemetryReceive uses.
+TELEMETRY_PORTS = {
+    "deviceMetrics": (512, "DeviceTelemetry"),
+    "powerMetrics": (513, "PowerTelemetry"),
+    "environmentMetrics": (514, "EnvironmentTelemetry"),
+    "hostMetrics": (515, "HostMetrics"),
+    "airQualityMetrics": (516, "AirQuality"),
+    "healthMetrics": (517, "HealthTelemetry"),
+}
 
 
 def initArgParser():
@@ -89,38 +85,26 @@ def initArgParser():
     parser = g.parser
 
     parser.add_argument(
-        "--dev",
-        help="Where the serial Meshtastic device is connected to, i.e. /dev/ttyUSB0",
-        default=None,
-        required=False,
-    )
-
-    parser.add_argument(
-        "--mqtt",
-        help="Connect to an MQTT broker instead of journal/serial (see mqtt_credentials.py)",
-        action="store_true",
-        required=False,
-    )
-
-    parser.add_argument(
         "-g",
         "--graph",
         help="Visualize the Meshtastic network from database",
-        action="count",
-        default=0,
-        required=False,
+        action="store_true",
     )
 
     parser.add_argument(
         "-s",
         "--stats",
         help="Generate the Meshtastic network statistics from database",
-        action="count",
-        default=0,
-        required=False,
+        action="store_true",
     )
 
-    parser.set_defaults(deprecated=None)
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        help="Include LOG_DEBUG messages (repeater handshake/forwarding detail) in log output",
+        action="store_true",
+    )
+
     parser.add_argument("--version", action="version", version=f"{__version__}")
 
     g.args = parser.parse_args()
@@ -230,49 +214,23 @@ def statistics(hourly=False):
             diff_sec = (
                 datetime.datetime.now() - module_count["startlog"]
             ).total_seconds()
-            statistics["Device Telemetry"] = math.ceil(
-                (module_count["DeviceTelemetry"] / diff_sec) * 60 * 60
-            )
-            statistics["Environment Telemetry"] = math.ceil(
-                (module_count["EnvironmentTelemetry"] / diff_sec) * 60 * 60
-            )
-            statistics["Host Metrics"] = math.ceil(
-                (module_count["HostMetrics"] / diff_sec) * 60 * 60
-            )
-            statistics["Store Forward"] = math.ceil(
-                (module_count["StoreForward"] / diff_sec) * 60 * 60
-            )
-            statistics["Power Telemetry"] = math.ceil(
-                (module_count["PowerTelemetry"] / diff_sec) * 60 * 60
-            )
-            statistics["Traceroute"] = math.ceil(
-                (module_count["traceroute"] / diff_sec) * 60 * 60
-            )
-            # statistics['Routing'] = math.ceil((module_count['routing'] / diff_sec) * 60 * 60)
-            statistics["Position"] = math.ceil(
-                (module_count["position"] / diff_sec) * 60 * 60
-            )
-            statistics["NodeInfo"] = math.ceil(
-                (module_count["nodeinfo"] / diff_sec) * 60 * 60
-            )
-            statistics["Text"] = math.ceil(
-                (module_count["text msg"] / diff_sec) * 60 * 60
-            )
-            statistics["Waypoint"] = math.ceil(
-                (module_count["waypoint msg"] / diff_sec) * 60 * 60
-            )
-            statistics["External Notification"] = math.ceil(
-                (module_count["ExternalNotificationModule"] / diff_sec) * 60 * 60
-            )
-            statistics["Air Quality"] = math.ceil(
-                (module_count["AirQuality"] / diff_sec) * 60 * 60
-            )
-            statistics["Admin"] = math.ceil(
-                (module_count["admin"] / diff_sec) * 60 * 60
-            )
-            statistics["Error7"] = math.ceil(
-                (module_count["error7"] / diff_sec) * 60 * 60
-            )
+            STAT_LABELS = [
+                ("Device Telemetry", "DeviceTelemetry"),
+                ("Environment Telemetry", "EnvironmentTelemetry"),
+                ("Host Metrics", "HostMetrics"),
+                ("Store Forward", "StoreForward"),
+                ("Power Telemetry", "PowerTelemetry"),
+                ("Traceroute", "traceroute"),
+                ("Position", "position"),
+                ("NodeInfo", "nodeinfo"),
+                ("Text", "text msg"),
+                ("Waypoint", "waypoint msg"),
+                ("External Notification", "ExternalNotificationModule"),
+                ("Air Quality", "AirQuality"),
+                ("Admin", "admin"),
+            ]
+            for label, key in STAT_LABELS:
+                statistics[label] = math.ceil((module_count[key] / diff_sec) * 60 * 60)
             statistics = dict(
                 sorted(statistics.items(), key=lambda item: item[1], reverse=True)
             )
@@ -442,6 +400,47 @@ def statistics(hourly=False):
         plt.savefig(os.getcwd() + "/web/weekly.png", dpi=100, bbox_inches="tight")
         plt.close()
 
+        # Create hop-count distribution graph (mesh diameter indicator)
+        hops = packets["hops_used"].dropna()
+        if not hops.empty:
+            hop_counts = hops.value_counts().sort_index()
+            plt.figure(figsize=(6, 4))
+            hops_plot = sns.barplot(
+                x=hop_counts.index.astype(int), y=hop_counts.values, color=CHART_COLOR
+            )
+            hops_plot.set_xlabel("Anzahl Hops")
+            hops_plot.set_ylabel("Packete")
+            hops_plot.set(title="Messzeitraum: " + period)
+            hops_plot.figure.suptitle("Hop-Verteilung im Mesh")
+            plt.savefig(os.getcwd() + "/web/hops.png", dpi=100, bbox_inches="tight")
+            plt.close()
+
+        # Create channel/airtime utilization per node graph (congestion indicator)
+        airtime = packets.dropna(subset=["air_util_tx"]).groupby("longname")["air_util_tx"].mean().sort_values(
+            ascending=False
+        )
+        if not airtime.empty:
+            plt.figure(figsize=(8, max(4, 0.3 * len(airtime))))
+            airtime_plot = sns.barplot(x=airtime.values, y=airtime.index, color=CHART_COLOR, orient="h")
+            airtime_plot.set_xlabel("Kanalauslastung TX (%)")
+            airtime_plot.set_ylabel("Knoten")
+            airtime_plot.set(title="Messzeitraum: " + period)
+            airtime_plot.figure.suptitle("Kanalauslastung (Airtime) pro Knoten")
+            plt.savefig(os.getcwd() + "/web/airtime.png", dpi=100, bbox_inches="tight")
+            plt.close()
+
+        # Create average RX SNR per node graph (weak-link indicator, worst first)
+        snr = packets.dropna(subset=["rx_snr"]).groupby("longname")["rx_snr"].mean().sort_values()
+        if not snr.empty:
+            plt.figure(figsize=(8, max(4, 0.3 * len(snr))))
+            snr_plot = sns.barplot(x=snr.values, y=snr.index, color=CHART_COLOR, orient="h")
+            snr_plot.set_xlabel("Ø SNR (dB)")
+            snr_plot.set_ylabel("Knoten")
+            snr_plot.set(title="Messzeitraum: " + period)
+            snr_plot.figure.suptitle("Empfangsqualität pro Knoten (SNR)")
+            plt.savefig(os.getcwd() + "/web/snr.png", dpi=100, bbox_inches="tight")
+            plt.close()
+
         # Create packet statistics graph for each node
         for node, node_packets in packets.groupby(["source", "longname"]):
             node_id = node[0]
@@ -534,8 +533,6 @@ def statistics(hourly=False):
         )
         # Save generated web content
         index_file = os.getcwd() + "/web/index.html"
-        if os.path.isfile(index_file):
-            os.remove(index_file)
         with open(index_file, "w", encoding="utf-8") as f:
             f.write(html)
 
@@ -632,324 +629,24 @@ def graph(full=False):
             database.close()
 
 
-def logParser():
-    lock = g.lock
-    reader = g.reader
-    ev_run = g.ev_run
-    if ev_run is None:
-        return  # No event to run, exit the thread
-
-    # Connect to database
-    try:
-        database = sqlite3.connect(DATABASE_FILE, isolation_level="DEFERRED")
-    except Exception as e:
-        reader.log(f"Connection to database failed. Error: {e}", level=reader.LOG_ERR)
-        # sys.exit() would only stop this thread, not the whole program;
-        # clear the shared run event so the scheduler thread stops too.
-        ev_run.clear()
-        return
-
-    # Keep track of each received packet type (named module in debug log)
-    module_count = g.module_count
-    module_count["startlog"] = datetime.datetime.now()
-    is_telemetry_packet = False
-    telemetry_from_id = 0
-
-    # Parse the Meshtastic debug log
-    reader.log(
-        f"Log parser started as {reader.__class__.__name__}", level=reader.LOG_INFO
-    )
-    while ev_run.is_set():
-        for line in reader.poll_read():
-            if line is None:
-                ev_run.clear()  # Stop the thread if reading serial device failed
-                break
-            # Store any packet received with source ID, type and timestamp.
-            # Used in a nodes packet statistics graph.
-            rx_packet = re.search(REGEX_PACKET_RX, line)
-            if rx_packet is not None:
-                # This is why key in PORT_NUMBERS must be lower case
-                packet_type = rx_packet.group("type").lower()
-                if packet_type != "routing":
-                    telemetry_from_id = int(rx_packet.group("from"), 16)
-                    # Ignore broadcast or unknown ID
-                    if telemetry_from_id == 0xFFFFFFFF or telemetry_from_id == 0:
-                        is_telemetry_packet = False
-                        continue
-                    if packet_type not in PORT_NUMBERS.keys():
-                        reader.log(
-                            f"Unknown packet type: {packet_type} from {telemetry_from_id}",
-                            level=reader.LOG_WARNING,
-                        )
-
-                    else:
-                        num = PORT_NUMBERS[packet_type]
-                        if num != 67:
-                            # Handle everything except telemetry packets
-                            module_count[packet_type] += 1
-                            with lock:
-                                cur = database.cursor()
-                                data = [
-                                    {"id": telemetry_from_id, "type": num},
-                                ]
-                                cur.executemany(
-                                    "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));",
-                                    data,
-                                )
-                                database.commit()
-                                cur.close()
-                        else:
-                            is_telemetry_packet = True  # Indicate telemetry packet
-                            # We need one more line to check which type of telemetry packet it is
-                            continue
-
-                continue
-
-            # Handle different telemetry packets with port number 67
-            if is_telemetry_packet:
-                data = None
-                if "air_util_tx" in line:
-                    module_count["DeviceTelemetry"] += 1
-                    data = [
-                        {"id": telemetry_from_id, "type": 512},
-                    ]
-                elif "ch1_voltage" in line:
-                    module_count["PowerTelemetry"] += 1
-                    data = [
-                        {"id": telemetry_from_id, "type": 513},
-                    ]
-                elif "barometric_pressure" in line:
-                    module_count["EnvironmentTelemetry"] += 1
-                    data = [
-                        {"id": telemetry_from_id, "type": 514},
-                    ]
-                elif "diskfree" in line:
-                    module_count["HostMetrics"] += 1
-                    data = [
-                        {"id": telemetry_from_id, "type": 515},
-                    ]
-                elif "pm10_standard" in line:
-                    module_count["AirQuality"] += 1
-                    data = [
-                        {"id": telemetry_from_id, "type": 516},
-                    ]
-                elif "heart_bpm" in line:
-                    module_count["HealthTelemetry"] += 1
-                    data = [
-                        {"id": telemetry_from_id, "type": 517},
-                    ]
-
-                if data is not None:
-                    # Store telemetry packet in database
-                    with lock:
-                        cur = database.cursor()
-                        cur.executemany(
-                            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));",
-                            data,
-                        )
-                        database.commit()
-                        cur.close()
-
-                is_telemetry_packet = False
-                telemetry_from_id = 0
-                continue
-
-            # Handle decoding messages
-            decoding = re.search(REGEX_DECODING, line)
-            if decoding is not None:
-                if decoding.group("decoding") == "decoded message":
-                    module_count["decoded"] += 1
-                elif decoding.group("decoding") == "no PSK":
-                    module_count["encrypted"] += 1
-                continue
-
-            # Store names and ID from received node information
-            # Used in mesh visualization.
-            info = re.search(REGEX_NODE_INFO, line)
-            if info is not None:
-                hex_id = info.group(2)[-4:].upper()
-                id = int(info.group(2), 16)
-                # Ignore broadcast or unknown ID
-                if id == 0xFFFFFFFF or id == 0:
-                    continue
-                name = info.group(1)
-                name = name.rsplit("/", 1)
-                short_name = name[1].strip(" #")
-                if short_name is None or short_name == "":
-                    short_name = hex_id
-                long_name = name[0].strip(" #")
-                if long_name is None or long_name == "":
-                    long_name = id
-
-                with lock:
-                    cur = database.cursor()
-                    data = [
-                        {"id": id, "shortname": short_name, "longname": long_name},
-                    ]
-                    cur.executemany(
-                        "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET shortname=:shortname, longname=:longname, seen=strftime('%s','now');",
-                        data,
-                    )
-                    database.commit()
-                    cur.close()
-                continue
-
-            # Store received nodes position
-            pos = re.search(REGEX_POSITION, line)
-            if pos is not None:
-                id = int(pos.group(1), 16)
-                # Ignore broadcast or unknown ID
-                if id == 0xFFFFFFFF or id == 0:
-                    continue
-                lat = int(pos.group(2), 10) * 1e-7
-                lon = int(pos.group(3), 10) * 1e-7
-                # lat=0/lon=0 means "no GPS fix" (l=0 payload); skip to avoid
-                # overwriting a node's last known position with Null Island.
-                if lat == 0 and lon == 0:
-                    continue
-                with lock:
-                    cur = database.cursor()
-                    data = [
-                        {"id": id, "lat": lat, "lon": lon},
-                    ]
-                    cur.executemany(
-                        "UPDATE OR IGNORE nodes SET seen = strftime('%s','now'), latitude = :lat, longitude = :lon WHERE id = :id;",
-                        data,
-                    )
-                    database.commit()
-                    cur.close()
-                continue
-
-            # Store received node role and hardware version
-            match = re.search(REGEX_ROLE, line)
-            if match is not None:
-                id = int(match.group("id"), 16)
-                # Ignore broadcast or unknown ID
-                if id == 0xFFFFFFFF or id == 0:
-                    continue
-                role = int(match.group("role"), 10) or 0
-                hw = int(match.group("hw"), 10) or 0
-                with lock:
-                    cur = database.cursor()
-                    data = [
-                        {"id": id, "role": role, "hw": hw},
-                    ]
-                    cur.executemany(
-                        "UPDATE OR IGNORE nodes SET role = :role, hardware = :hw WHERE id = :id;",
-                        data,
-                    )
-                    database.commit()
-                    cur.close()
-                continue
-
-            # Count error -7 (CRC mismatch) for reception quality statistics
-            if "error=-7" in line:
-                module_count["error7"] += 1
-                continue
-
-            # Evaluate all received trace route packets.
-            # Packets are split into 2 point connections and stored in database as link between two nodes.
-            # Used in mesh visualization.
-            if (
-                line.startswith("#Start")
-                or line.startswith("|")
-                or line.startswith("#Back")
-            ):
-                source = None
-                dest = None
-                snr = None
-                nodes = line.split(">")
-                for n in range(len(nodes) - 1):
-                    source = re.search(REGEX_TRACEROUTE, nodes[n])
-                    dest = re.search(REGEX_TRACEROUTE, nodes[n + 1].strip())
-                    if dest is not None:
-                        if dest.group(3) is not None:
-                            snr = float(dest.group(3))
-                        else:
-                            snr = -500  # Invalid SNR
-                        source = int(source.group(1), 16)
-                        dest = int(dest.group(1), 16)
-                        # Ignore broadcast, unknown ID or equal source-destination
-                        if (
-                            source == 0xFFFFFFFF
-                            or dest == 0xFFFFFFFF
-                            or source == 0
-                            or dest == 0
-                            or source == dest
-                        ):
-                            continue
-                        with lock:
-                            cur = database.cursor()
-                            data = [
-                                {"source": source, "destination": dest, "snr": snr},
-                            ]
-                            cur.executemany(
-                                "INSERT OR REPLACE INTO links VALUES(:source, :destination, :snr, strftime('%s','now'));",
-                                data,
-                            )
-                            cur.executemany(
-                                "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
-                                ({"id": source},),
-                            )
-                            cur.executemany(
-                                "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
-                                ({"id": dest},),
-                            )
-                            if n == 0:
-                                cur.executemany(
-                                    "UPDATE OR IGNORE nodes SET tracestart = tracestart + 1 where id = :id;",
-                                    ({"id": source},),
-                                )
-                            database.commit()
-                            cur.close()
-                continue
-        # end for entry
-    # end while ev_run
-
-    # Close database connection
-    if database is not None:
-        database.close()
-
-
-def mqtt_topic_kind(topic):
-    """Classify an MQTT topic as a relayed channel packet or a flat self-report."""
-    suffix = topic.rsplit("/", 1)[-1]
-    if suffix in ("device", "environment", "localStats"):
-        return suffix
-    return "channel"
-
-
-def mqtt_node_id(value):
-    """Parse a Meshtastic '!hex' (or bare hex) node id string into an int."""
-    return int(value.lstrip("!"), 16)
-
-
-def classify_mqtt_telemetry(payload):
-    """Map a channel-topic telemetry payload to its synthetic port number,
-    since MQTT JSON collapses every telemetry sub-type into type="telemetry"
-    and only the fields present disambiguate which one this is.
-    """
-    if "battery_level" in payload or "uptime_seconds" in payload:
-        return 512  # Device Telemetry
-    if "voltage_ch1" in payload or "current_ch1" in payload:
-        return 513  # Power Telemetry
-    if "barometric_pressure" in payload or "temperature" in payload:
-        return 514  # Environment Telemetry
-    if "diskfree" in payload:
-        return 515  # Host Metrics
-    if "pm10_standard" in payload:
-        return 516  # Air Quality
-    if "heart_bpm" in payload:
-        return 517  # Health Telemetry
-    return 67  # Fallback: generic Telemetry (e.g. distance-sensor payloads)
-
-
-def _insert_packet(database, lock, source_id, port_num):
+def _insert_packet(
+    database, lock, source_id, port_num, hops_used=None, rx_snr=None, rx_rssi=None, channel_util=None, air_util_tx=None
+):
     with lock:
         cur = database.cursor()
         cur.executemany(
-            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'));",
-            [{"id": source_id, "type": port_num}],
+            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'), :hops_used, :rx_snr, :rx_rssi, :channel_util, :air_util_tx);",
+            [
+                {
+                    "id": source_id,
+                    "type": port_num,
+                    "hops_used": hops_used,
+                    "rx_snr": rx_snr,
+                    "rx_rssi": rx_rssi,
+                    "channel_util": channel_util,
+                    "air_util_tx": air_util_tx,
+                }
+            ],
         )
         database.commit()
         cur.close()
@@ -971,117 +668,176 @@ def _upsert_node(database, lock, node_id, shortname=None, longname=None, role=No
         cur.close()
 
 
-def _handle_channel_packet(database, lock, module_count, payload):
-    msg_type = payload.get("type", "")
-    if msg_type == "":
-        return  # Undecoded/no-PSK packet: no usable data, dropped by design.
+def _enum_int(enum_type, name, default=0):
+    """Resolve a protobuf enum name (as given by MessageToDict) back to its int
+    value -- the nodes table stores role/hardware as INTEGER (see statistics()'s
+    roles[role_int] lookup), but the decoded packet dict carries enum names.
+    """
+    if not name:
+        return default
+    try:
+        return enum_type.Value(name)
+    except ValueError:
+        return default
 
-    from_id = payload.get("from")
+
+def _classify_telemetry(telemetry):
+    """Discriminate a decoded TELEMETRY_APP packet's sub-type the same way the
+    meshtastic library's own _onTelemetryReceive does: by which oneof key is
+    present in the decoded dict.
+    """
+    for key, result in TELEMETRY_PORTS.items():
+        if key in telemetry:
+            return result
+    return 67, "telemetry"  # Fallback: generic Telemetry (e.g. distance-sensor payloads)
+
+
+def _handle_tcp_packet(database, lock, module_count, reader, packet):
+    """Write one decoded packet (from the "meshtastic.receive" pypubsub topic)
+    into the DB. Own-node packets update node metadata but are excluded from
+    the packets table so statistics() reflects only real mesh traffic, not
+    the connected-API chatter that was never actually transmitted over LoRa.
+    """
+    decoded = packet.get("decoded")
+    if decoded is None:
+        module_count["encrypted"] = module_count.get("encrypted", 0) + 1
+        return
+    module_count["decoded"] = module_count.get("decoded", 0) + 1
+
+    from_id = packet.get("from")
     if from_id is None or from_id in (0, 0xFFFFFFFF):
         return
 
-    if msg_type == "nodeinfo":
-        info = payload.get("payload", {})
-        node_id = mqtt_node_id(info.get("id", "0"))
-        if node_id in (0, 0xFFFFFFFF):
-            return
+    iface = reader.iface
+    is_own = (
+        iface is not None
+        and iface.myInfo is not None
+        and from_id == iface.myInfo.my_node_num
+    )
+    portnum = decoded.get("portnum", "")
+
+    # hopStart/hopLimit/rxSnr/rxRssi live on the MeshPacket envelope itself
+    # (not inside `decoded`), and are set by our own node's radio for
+    # whichever hop last relayed the packet to us -- available regardless of
+    # port type, so extracted once here rather than per-branch.
+    hop_start = packet.get("hopStart")
+    hop_limit = packet.get("hopLimit")
+    hops_used = hop_start - hop_limit if hop_start is not None and hop_limit is not None else None
+    rx_snr = packet.get("rxSnr")
+    rx_rssi = packet.get("rxRssi")
+
+    if portnum == "NODEINFO_APP":
+        user = decoded.get("user", {})
         _upsert_node(
             database,
             lock,
-            node_id,
-            shortname=info.get("shortname"),
-            longname=info.get("longname"),
-            role=info.get("role"),
-            hw=info.get("hardware"),
+            from_id,
+            shortname=user.get("shortName"),
+            longname=user.get("longName"),
+            role=_enum_int(config_pb2.Config.DeviceConfig.Role, user.get("role")),
+            hw=_enum_int(mesh_pb2.HardwareModel, user.get("hwModel")),
         )
         module_count["nodeinfo"] += 1
-        _insert_packet(database, lock, node_id, PORT_NUMBERS["nodeinfo"])
+        if not is_own:
+            _insert_packet(database, lock, from_id, PORT_NUM_NODEINFO, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
-    elif msg_type == "position":
-        info = payload.get("payload", {})
-        lat = info.get("latitude_i", 0) * 1e-7
-        lon = info.get("longitude_i", 0) * 1e-7
+    elif portnum == "POSITION_APP":
+        position = decoded.get("position", {})
+        lat = position.get("latitudeI", 0) * 1e-7
+        lon = position.get("longitudeI", 0) * 1e-7
         # lat=0/lon=0 means "no GPS fix"; skip to avoid overwriting a node's
         # last known position with Null Island.
-        if lat == 0 and lon == 0:
-            return
+        if lat != 0 or lon != 0:
+            with lock:
+                cur = database.cursor()
+                cur.executemany(
+                    "UPDATE OR IGNORE nodes SET seen = strftime('%s','now'), latitude = :lat, longitude = :lon WHERE id = :id;",
+                    [{"id": from_id, "lat": lat, "lon": lon}],
+                )
+                database.commit()
+                cur.close()
+        module_count["position"] += 1
+        if not is_own:
+            _insert_packet(database, lock, from_id, PORT_NUM_POSITION, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+
+    elif portnum == "TRACEROUTE_APP":
+        traceroute = decoded.get("traceroute", {})
+        # Unlike the old MQTT JSON format (long names only, or "Unknown"), the
+        # TCP API gives real node numbers for the whole route -- write every
+        # hop-to-hop link, not just the endpoints.
+        route = [from_id, *traceroute.get("route", []), packet.get("to")]
+        snr_towards = traceroute.get("snrTowards") or []
         with lock:
             cur = database.cursor()
-            cur.executemany(
-                "UPDATE OR IGNORE nodes SET seen = strftime('%s','now'), latitude = :lat, longitude = :lon WHERE id = :id;",
-                [{"id": from_id, "lat": lat, "lon": lon}],
-            )
+            for i in range(len(route) - 1):
+                src, dst = route[i], route[i + 1]
+                if src in (0, 0xFFFFFFFF, None) or dst in (0, 0xFFFFFFFF, None) or src == dst:
+                    continue
+                snr = snr_towards[i] / 4 if i < len(snr_towards) else -500
+                cur.executemany(
+                    "INSERT OR REPLACE INTO links VALUES(:source, :destination, :snr, strftime('%s','now'));",
+                    [{"source": src, "destination": dst, "snr": snr}],
+                )
+                cur.executemany(
+                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
+                    ({"id": src},),
+                )
             database.commit()
             cur.close()
-        module_count["position"] += 1
-        _insert_packet(database, lock, from_id, PORT_NUMBERS["position"])
-
-    elif msg_type == "traceroute":
-        info = payload.get("payload", {})
-        sender = payload.get("sender")
-        # ponytail: route/route_back only carry truncated short-names or
-        # "Unknown" (e.g. "ee3d"), not resolvable node ids, so we can't
-        # reconstruct the full hop path here. Only the always-numeric
-        # from/sender endpoints are linked; a real fix needs a short-name
-        # to node-id lookup against the nodes table.
-        if sender:
-            dest_id = mqtt_node_id(sender)
-            if dest_id not in (0, 0xFFFFFFFF, from_id):
-                snr_towards = info.get("snr_towards") or []
-                snr = snr_towards[0] if snr_towards else -500
-                with lock:
-                    cur = database.cursor()
-                    cur.executemany(
-                        "INSERT OR REPLACE INTO links VALUES(:source, :destination, :snr, strftime('%s','now'));",
-                        [{"source": from_id, "destination": dest_id, "snr": snr}],
-                    )
-                    database.commit()
-                    cur.close()
-                _upsert_node(database, lock, dest_id)
         _upsert_node(database, lock, from_id)
         module_count["traceroute"] += 1
-        _insert_packet(database, lock, from_id, PORT_NUMBERS["traceroute"])
+        if not is_own:
+            _insert_packet(database, lock, from_id, PORT_NUM_TRACEROUTE, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
-    elif msg_type == "telemetry":
-        info = payload.get("payload", {})
-        port_num = classify_mqtt_telemetry(info)
-        counter_key = {
-            512: "DeviceTelemetry",
-            513: "PowerTelemetry",
-            514: "EnvironmentTelemetry",
-            515: "HostMetrics",
-            516: "AirQuality",
-            517: "HealthTelemetry",
-        }.get(port_num, "telemetry")
+    elif portnum == "TELEMETRY_APP":
+        telemetry = decoded.get("telemetry", {})
+        port_num, counter_key = _classify_telemetry(telemetry)
         module_count[counter_key] = module_count.get(counter_key, 0) + 1
-        _insert_packet(database, lock, from_id, port_num)
+        if not is_own:
+            device_metrics = telemetry.get("deviceMetrics", {})
+            _insert_packet(
+                database,
+                lock,
+                from_id,
+                port_num,
+                hops_used=hops_used,
+                rx_snr=rx_snr,
+                rx_rssi=rx_rssi,
+                channel_util=device_metrics.get("channelUtilization"),
+                air_util_tx=device_metrics.get("airUtilTx"),
+            )
+
+    elif portnum == "TEXT_MESSAGE_APP":
+        module_count["text msg"] += 1
+        if not is_own:
+            _insert_packet(database, lock, from_id, PORT_NUM_TEXT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+
+    elif portnum == "WAYPOINT_APP":
+        module_count["waypoint msg"] += 1
+        if not is_own:
+            _insert_packet(database, lock, from_id, PORT_NUM_WAYPOINT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+
+    elif portnum == "ADMIN_APP":
+        module_count["admin"] += 1
+        if not is_own:
+            _insert_packet(database, lock, from_id, PORT_NUM_ADMIN, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
 
-def _handle_self_report(database, lock, module_count, topic, port_num, counter_key, own_node_id=None):
-    # Self-report topics carry the node id in the topic path, not the payload.
-    node_id = mqtt_node_id(topic.split("/")[-2])
-    if node_id in (0, 0xFFFFFFFF) or node_id == own_node_id:
-        return
-    module_count[counter_key] = module_count.get(counter_key, 0) + 1
-    _insert_packet(database, lock, node_id, port_num)
-
-
-def mqttListener():
-    """Thread body for the --mqtt run mode. MqttReader/paho does the actual
-    network I/O on its own thread; this thread just registers the pypubsub
-    handler and idles until told to stop.
+def tcpListener():
+    """Thread body for the sole ingestion mode: hold the single upstream TCP
+    API connection, write decoded packets to the DB, and repeat the same
+    connection out to other Meshtastic API clients (repeater_core.py).
     """
     lock = g.lock
-    reader = g.reader
+    reader = g.reader  # TcpReader
     ev_run = g.ev_run
     if ev_run is None:
         return
 
     try:
-        # check_same_thread=False: the handler below runs on paho's internal
-        # network thread (where MqttReader publishes each message), not this
-        # one. Writes are still serialized through g.lock like every other
-        # DB access in this codebase.
+        # check_same_thread=False: the handler below runs on the meshtastic
+        # library's own "publishing" thread, not this one. Writes are still
+        # serialized through g.lock like every other DB access in this codebase.
         database = sqlite3.connect(
             DATABASE_FILE, isolation_level="DEFERRED", check_same_thread=False
         )
@@ -1093,43 +849,35 @@ def mqttListener():
     module_count = g.module_count
     module_count["startlog"] = datetime.datetime.now()
 
-    import mqtt_credentials
+    import tcp_credentials
 
-    own_node_id_str = getattr(mqtt_credentials, "__node_id__", "")
-    own_node_id = mqtt_node_id(own_node_id_str) if own_node_id_str else None
+    core = RepeaterCore(reader)
+    tcp_server = TcpRepeaterServer(
+        "0.0.0.0", getattr(tcp_credentials, "__repeater_tcp_port__", 4403), core
+    )
+    http_server = HttpRepeaterServer(
+        "0.0.0.0", getattr(tcp_credentials, "__repeater_http_port__", 4404), core
+    )
+    threading.Thread(target=tcp_server.serve_forever, name="TCP repeater", daemon=True).start()
+    threading.Thread(target=http_server.serve_forever, name="HTTP repeater", daemon=True).start()
 
-    def handle_mqtt_message(topic, payload):
+    def handle_packet(packet, interface):
         try:
-            kind = mqtt_topic_kind(topic)
-            if kind == "channel":
-                _handle_channel_packet(database, lock, module_count, payload)
-            elif kind == "device":
-                _handle_self_report(
-                    database, lock, module_count, topic, 512, "DeviceTelemetry", own_node_id
-                )
-            elif kind == "environment":
-                _handle_self_report(
-                    database, lock, module_count, topic, 514, "EnvironmentTelemetry", own_node_id
-                )
-            elif kind == "localStats":
-                # No matching packet_types entry for link-quality/queue stats;
-                # fall back to the generic Telemetry port rather than
-                # inventing a new port number.
-                _handle_self_report(
-                    database, lock, module_count, topic, 67, "telemetry", own_node_id
-                )
+            _handle_tcp_packet(database, lock, module_count, reader, packet)
         except Exception as e:
-            reader.log(f"Failed handling MQTT message on {topic}: {e}", level=reader.LOG_WARNING)
+            reader.log(f"Failed handling packet: {e}", level=reader.LOG_WARNING)
 
-    pub.subscribe(handle_mqtt_message, "mqtt.message")
+    pub.subscribe(handle_packet, "meshtastic.receive")
     reader.log(
-        f"MQTT listener started as {reader.__class__.__name__}", level=reader.LOG_INFO
+        f"TCP listener + repeater started as {reader.__class__.__name__}", level=reader.LOG_INFO
     )
 
     while ev_run.is_set():
-        time.sleep(1)  # Actual work happens in handle_mqtt_message above.
+        time.sleep(1)  # Actual work happens in handle_packet above.
 
-    pub.unsubscribe(handle_mqtt_message, "mqtt.message")
+    pub.unsubscribe(handle_packet, "meshtastic.receive")
+    tcp_server.shutdown()
+    http_server.shutdown()
     database.close()
 
 
@@ -1184,54 +932,33 @@ def main():
     initArgParser()
     args = g.args
 
-    if args.graph == 1:
+    if args.graph:
         graph(full=True)
         sys.exit(0)
 
-    if args.stats == 1:
+    if args.stats:
         statistics()
         sys.exit(0)
 
-    if args.mqtt and args.dev is not None:
-        print("--mqtt and --dev are mutually exclusive", file=sys.stderr)
-        sys.exit(1)
+    g.ev_run = ev_run  # Store event in globals for other threads; TcpReader
+    # needs it too, so its connect-retry loop can be interrupted by SIGINT/SIGTERM
 
-    if args.mqtt:
-        # Connect to an MQTT broker publishing Meshtastic JSON packets
-        import mqtt_credentials
+    # Connect to the Meshtastic node's TCP API (see tcp_credentials.py)
+    import tcp_credentials
 
-        reader = MqttReader(
-            mqtt_credentials.__broker__,
-            mqtt_credentials.__port__,
-            mqtt_credentials.__username__,
-            mqtt_credentials.__password__,
-            mqtt_credentials.__topic__,
-        )
-        if not reader.is_open():
-            sys.exit(1)
-        parser_target = mqttListener
-    elif args.dev is None:
-        # Connect to system journal that provides the Meshtasticd debug log
-        reader = JournalReader("meshtasticd.service")
-        parser_target = logParser
-    else:
-        # Connect to Meshtastic device via serial port
-        reader = SerialReader(args.dev)
-        if not reader.is_open():
-            sys.exit(1)
-        parser_target = logParser
+    reader = TcpReader(
+        tcp_credentials.__hostname__, tcp_credentials.__port__, ev_run, verbose=args.verbose
+    )
 
     g.reader = reader  # Store reader in globals for other threads
 
     # The threads we are running
-    t = threading.Thread(target=parser_target, name="Log Parser")
+    t = threading.Thread(target=tcpListener, name="Log Parser")
     t.daemon = True  # Daemon thread will exit when the main program exits
     threads.append(t)
     t = threading.Thread(target=scheduleRunner, name="Scheduler")
     t.daemon = True  # Daemon thread will exit when the main program exits
     threads.append(t)
-
-    g.ev_run = ev_run  # Store event in globals for other threads
 
     # Start each thread
     for t in threads:
