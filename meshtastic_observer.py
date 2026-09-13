@@ -2,7 +2,7 @@
 
 # This file is part of Meshtastic mesh observer.
 #
-# Copyright (c) 2025 Michael Wolf <michael@mictronics.de>
+# Copyright (c) 2026 Michael Wolf <michael@mictronics.de>
 #
 # Mesh observer is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -48,7 +48,7 @@ from tcp_reader import TcpReader
 from tcp_repeater import TcpRepeaterServer
 
 __author__ = "Michael Wolf aka Mictronics"
-__copyright__ = "2025, (C) Michael Wolf"
+__copyright__ = "2026, (C) Michael Wolf"
 __license__ = "GPL v3+"
 __version__ = "2.0.1"
 
@@ -924,7 +924,7 @@ def main():
     parser = argparse.ArgumentParser(
         prog="meshtastic observer",
         description="Log and visualize statistics of a Meshtastic network.",
-        epilog="License GPL-3+ (C) 2025 Michael Wolf, www.mictronics.de",
+        epilog="License GPL-3+ (C) 2026 Michael Wolf, www.mictronics.de",
     )
     g.parser = parser
     initArgParser()

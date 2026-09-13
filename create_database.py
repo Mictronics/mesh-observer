@@ -1,6 +1,6 @@
 # This file is part of Meshtastic mesh observer.
 #
-# Copyright (c) 2025 Michael Wolf <michael@mictronics.de>
+# Copyright (c) 2026 Michael Wolf <michael@mictronics.de>
 #
 # Mesh observer is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
