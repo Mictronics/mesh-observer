@@ -44,7 +44,7 @@ python3 meshtastic_observer.py -g
 # One-shot: (re)generate web/index.html + stat graphs from DB, then exit
 python3 meshtastic_observer.py -s
 
-# Print the version string (2.0.1) and exit
+# Print the version string (2.1.0) and exit
 python3 meshtastic_observer.py --version
 ```
 

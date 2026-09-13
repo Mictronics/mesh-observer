@@ -38,7 +38,7 @@ import seaborn as sns
 from d3graph import d3graph, vec2adjmat
 from jinja2 import Environment, FileSystemLoader
 from matplotlib.patches import Rectangle
-from meshtastic.protobuf import config_pb2, mesh_pb2
+from meshtastic.protobuf import config_pb2, mesh_pb2, portnums_pb2
 from pubsub import pub
 
 import globals as g
@@ -50,7 +50,7 @@ from tcp_repeater import TcpRepeaterServer
 __author__ = "Michael Wolf aka Mictronics"
 __copyright__ = "2026, (C) Michael Wolf"
 __license__ = "GPL v3+"
-__version__ = "2.0.1"
+__version__ = "2.1.0"
 
 DATABASE_FILE = "network.sqlite3"
 CHART_COLOR = "limegreen"
@@ -66,8 +66,9 @@ PORT_NUM_WAYPOINT = 8
 PORT_NUM_TRACEROUTE = 70
 
 # Synthetic telemetry sub-type ports this project invented (see
-# network.sqlite3.sql's packet_types 512-517) to disambiguate what the real
-# protocol collapses onto the single TELEMETRY_APP port (67); keyed by which
+# network.sqlite3.sql's packet_types 512-519, 517 reserved/unused) to
+# disambiguate what the real protocol collapses onto the single TELEMETRY_APP
+# port (67); keyed by which
 # oneof field is present on the decoded Telemetry message, the same
 # discriminator the meshtastic library's own _onTelemetryReceive uses.
 TELEMETRY_PORTS = {
@@ -76,7 +77,12 @@ TELEMETRY_PORTS = {
     "environmentMetrics": (514, "EnvironmentTelemetry"),
     "hostMetrics": (515, "HostMetrics"),
     "airQualityMetrics": (516, "AirQuality"),
-    "healthMetrics": (517, "HealthTelemetry"),
+    # 517 (Health Telemetry) is intentionally unmapped: the firmware feature
+    # it reports on is disabled by default and requires a manual rebuild to
+    # enable, so it's never expected on the wire -- unclassified health
+    # metrics fall through to the generic (67, "telemetry") bucket instead.
+    "localStats": (518, "LocalStats"),
+    "trafficManagementStats": (519, "TrafficManagementStats"),
 }
 
 
@@ -225,6 +231,8 @@ def statistics(hourly=False):
                 ("Text", "text msg"),
                 ("Waypoint", "waypoint msg"),
                 ("Air Quality", "AirQuality"),
+                ("Local Stats", "LocalStats"),
+                ("Traffic Management Stats", "TrafficManagementStats"),
                 ("Admin", "admin"),
             ]
             for label, key in STAT_LABELS:
@@ -693,8 +701,10 @@ def _classify_telemetry(telemetry):
 def _handle_tcp_packet(database, lock, module_count, reader, packet):
     """Write one decoded packet (from the "meshtastic.receive" pypubsub topic)
     into the DB. Own-node packets update node metadata but are excluded from
-    the packets table so statistics() reflects only real mesh traffic, not
-    the connected-API chatter that was never actually transmitted over LoRa.
+    both the packets table and the per-type module_count counters, so every
+    statistics() chart (hourly and long-term) reflects only real mesh
+    traffic, not the connected-API chatter (e.g. our own node pushing its
+    position/telemetry every minute) that was never actually sent over LoRa.
     """
     decoded = packet.get("decoded")
     if decoded is None:
@@ -735,8 +745,8 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
             role=_enum_int(config_pb2.Config.DeviceConfig.Role, user.get("role")),
             hw=_enum_int(mesh_pb2.HardwareModel, user.get("hwModel")),
         )
-        module_count["nodeinfo"] += 1
         if not is_own:
+            module_count["nodeinfo"] += 1
             _insert_packet(database, lock, from_id, PORT_NUM_NODEINFO, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "POSITION_APP":
@@ -754,8 +764,8 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                 )
                 database.commit()
                 cur.close()
-        module_count["position"] += 1
         if not is_own:
+            module_count["position"] += 1
             _insert_packet(database, lock, from_id, PORT_NUM_POSITION, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "TRACEROUTE_APP":
@@ -783,15 +793,15 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
             database.commit()
             cur.close()
         _upsert_node(database, lock, from_id)
-        module_count["traceroute"] += 1
         if not is_own:
+            module_count["traceroute"] += 1
             _insert_packet(database, lock, from_id, PORT_NUM_TRACEROUTE, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "TELEMETRY_APP":
         telemetry = decoded.get("telemetry", {})
         port_num, counter_key = _classify_telemetry(telemetry)
-        module_count[counter_key] = module_count.get(counter_key, 0) + 1
         if not is_own:
+            module_count[counter_key] = module_count.get(counter_key, 0) + 1
             device_metrics = telemetry.get("deviceMetrics", {})
             _insert_packet(
                 database,
@@ -806,19 +816,28 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
             )
 
     elif portnum == "TEXT_MESSAGE_APP":
-        module_count["text msg"] += 1
         if not is_own:
+            module_count["text msg"] += 1
             _insert_packet(database, lock, from_id, PORT_NUM_TEXT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "WAYPOINT_APP":
-        module_count["waypoint msg"] += 1
         if not is_own:
+            module_count["waypoint msg"] += 1
             _insert_packet(database, lock, from_id, PORT_NUM_WAYPOINT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
     elif portnum == "ADMIN_APP":
-        module_count["admin"] += 1
         if not is_own:
+            module_count["admin"] += 1
             _insert_packet(database, lock, from_id, PORT_NUM_ADMIN, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+
+    else:
+        # Any other real portnum (see network.sqlite3.sql's packet_types for
+        # display names) that doesn't need special field extraction -- still
+        # counted and logged instead of silently dropped.
+        port_num = _enum_int(portnums_pb2.PortNum, portnum, portnums_pb2.PortNum.UNKNOWN_APP)
+        if port_num != portnums_pb2.PortNum.UNKNOWN_APP and not is_own:
+            module_count[portnum] = module_count.get(portnum, 0) + 1
+            _insert_packet(database, lock, from_id, port_num, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
 
 
 def tcpListener():

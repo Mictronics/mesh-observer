@@ -47,9 +47,12 @@ INSERT OR REPLACE INTO "packet_types" VALUES (9,'Audio');
 INSERT OR REPLACE INTO "packet_types" VALUES (10,'Detection Sensor');
 INSERT OR REPLACE INTO "packet_types" VALUES (11,'Alert');
 INSERT OR REPLACE INTO "packet_types" VALUES (12,'Key Verification');
+INSERT OR REPLACE INTO "packet_types" VALUES (13,'Remote Shell');
 INSERT OR REPLACE INTO "packet_types" VALUES (32,'Reply');
 INSERT OR REPLACE INTO "packet_types" VALUES (33,'IP Tunnel');
 INSERT OR REPLACE INTO "packet_types" VALUES (34,'Pax Counter');
+INSERT OR REPLACE INTO "packet_types" VALUES (35,'Store Forward++');
+INSERT OR REPLACE INTO "packet_types" VALUES (36,'Node Status');
 INSERT OR REPLACE INTO "packet_types" VALUES (64,'Serial');
 INSERT OR REPLACE INTO "packet_types" VALUES (65,'Store Forward');
 INSERT OR REPLACE INTO "packet_types" VALUES (66,'Range Test');
@@ -61,8 +64,11 @@ INSERT OR REPLACE INTO "packet_types" VALUES (71,'Neighbor Info');
 INSERT OR REPLACE INTO "packet_types" VALUES (72,'ATAK Plugin');
 INSERT OR REPLACE INTO "packet_types" VALUES (73,'Map Report');
 INSERT OR REPLACE INTO "packet_types" VALUES (74,'Power Stress');
+INSERT OR REPLACE INTO "packet_types" VALUES (75,'LoRaWAN Bridge');
 INSERT OR REPLACE INTO "packet_types" VALUES (76,'Reticulum Tunnel');
 INSERT OR REPLACE INTO "packet_types" VALUES (77,'Cayenne');
+INSERT OR REPLACE INTO "packet_types" VALUES (78,'ATAK Plugin V2');
+INSERT OR REPLACE INTO "packet_types" VALUES (112,'Group Alarm');
 INSERT OR REPLACE INTO "packet_types" VALUES (256,'Private');
 INSERT OR REPLACE INTO "packet_types" VALUES (257,'ATAK Forwarder');
 INSERT OR REPLACE INTO "packet_types" VALUES (512,'Device Telemetry');
@@ -70,7 +76,8 @@ INSERT OR REPLACE INTO "packet_types" VALUES (513,'Power Telemetry');
 INSERT OR REPLACE INTO "packet_types" VALUES (514,'Environment Telemetry');
 INSERT OR REPLACE INTO "packet_types" VALUES (515,'Host Metrics');
 INSERT OR REPLACE INTO "packet_types" VALUES (516,'Air Quality');
-INSERT OR REPLACE INTO "packet_types" VALUES (517,'Health Telemetry');
+INSERT OR REPLACE INTO "packet_types" VALUES (518,'Local Stats');
+INSERT OR REPLACE INTO "packet_types" VALUES (519,'Traffic Management Stats');
 CREATE VIEW ViewPackets AS
 SELECT source, longname, type, port_name, time, role, hops_used, rx_snr, rx_rssi, channel_util, air_util_tx FROM packets AS p
 INNER JOIN packet_types ON packet_types.port_num = p.type

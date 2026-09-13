@@ -84,6 +84,12 @@ class TestClassifyTelemetry:
     def test_power_metrics(self):
         assert mo._classify_telemetry({"powerMetrics": {"ch1Voltage": 19.5}}) == (513, "PowerTelemetry")
 
+    def test_local_stats(self):
+        assert mo._classify_telemetry({"localStats": {"numOnlineNodes": 3}}) == (518, "LocalStats")
+
+    def test_traffic_management_stats(self):
+        assert mo._classify_telemetry({"trafficManagementStats": {}}) == (519, "TrafficManagementStats")
+
     def test_unknown_falls_back_to_generic_telemetry(self):
         assert mo._classify_telemetry({}) == (67, "telemetry")
 
@@ -167,10 +173,31 @@ class TestHandleTcpPacket:
                 "user": {"shortName": "ME", "longName": "Gateway", "role": "CLIENT", "hwModel": "UNSET"},
             },
         }
-        handle(db, packet, own_node_num=42)
+        counts = handle(db, packet, own_node_num=42)
         assert db.execute("SELECT count(*) FROM packets").fetchone()[0] == 0
         row = db.execute("SELECT shortname FROM nodes WHERE id = 42").fetchone()
         assert row == ("ME",)
+        # Own-node chatter (API-connected, not actually on-air) must not
+        # inflate the hourly module_count stats either -- see packets table
+        # assertion above for the parallel guarantee on long-term stats.
+        assert counts["nodeinfo"] == 0
+
+    def test_own_node_position_and_telemetry_do_not_inflate_module_count(self):
+        db = make_db()
+        db.execute("INSERT INTO nodes VALUES (42, NULL, NULL, 0, NULL, NULL, 0, 0)")
+        position_counts = handle(
+            db,
+            {"from": 42, "decoded": {"portnum": "POSITION_APP", "position": {"latitudeI": 500000000, "longitudeI": 100000000}}},
+            own_node_num=42,
+        )
+        telemetry_counts = handle(
+            db,
+            {"from": 42, "decoded": {"portnum": "TELEMETRY_APP", "telemetry": {"deviceMetrics": {"batteryLevel": 90}}}},
+            own_node_num=42,
+        )
+        assert position_counts["position"] == 0
+        assert telemetry_counts.get("DeviceTelemetry", 0) == 0
+        assert db.execute("SELECT count(*) FROM packets").fetchone()[0] == 0
 
     def test_traceroute_writes_full_hop_chain_not_just_endpoints(self):
         db = make_db()
@@ -225,3 +252,17 @@ class TestHandleTcpPacket:
         handle(db, packet)
         row = db.execute("SELECT type, channel_util, air_util_tx FROM packets").fetchone()
         assert row == (512, 12.5, 3.4)
+
+    def test_unhandled_portnum_falls_back_to_generic_logging(self):
+        db = make_db()
+        packet = {"from": 1, "decoded": {"portnum": "ROUTING_APP"}}
+        counts = handle(db, packet)
+        assert counts["ROUTING_APP"] == 1
+        row = db.execute("SELECT source, type FROM packets").fetchone()
+        assert row == (1, 5)
+
+    def test_unknown_app_portnum_is_not_logged(self):
+        db = make_db()
+        packet = {"from": 1, "decoded": {"portnum": "UNKNOWN_APP"}}
+        handle(db, packet)
+        assert db.execute("SELECT count(*) FROM packets").fetchone()[0] == 0
