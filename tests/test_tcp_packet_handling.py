@@ -24,7 +24,7 @@ def make_db():
         );
         CREATE TABLE nodes (
             id INTEGER NOT NULL, shortname TEXT, longname TEXT, seen INTEGER,
-            latitude REAL, longitude REAL, tracestart INTEGER DEFAULT 0,
+            latitude REAL, longitude REAL,
             role INTEGER DEFAULT 0, hardware INTEGER DEFAULT 0, PRIMARY KEY(id)
         );
         CREATE TABLE packets (
@@ -125,7 +125,7 @@ class TestHandleTcpPacket:
 
     def test_position_updates_lat_lon(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, NULL, NULL, 0, 0, 0)", (1,))
+        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, NULL, NULL, 0, 0)", (1,))
         packet = {
             "from": 1,
             "decoded": {
@@ -139,7 +139,7 @@ class TestHandleTcpPacket:
 
     def test_zero_position_is_ignored(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, 12.0, 34.0, 0, 0, 0)", (1,))
+        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, 12.0, 34.0, 0, 0)", (1,))
         packet = {
             "from": 1,
             "decoded": {"portnum": "POSITION_APP", "position": {"latitudeI": 0, "longitudeI": 0}},

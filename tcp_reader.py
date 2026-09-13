@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with mesh observer. If not, see http://www.gnu.org/licenses/.
 #
+import logging
 import threading
 import time
 from typing import Final
@@ -30,6 +31,27 @@ RECONNECT_GRACE_SEC = 10
 BACKOFF_START_SEC = 2
 BACKOFF_MAX_SEC = 60
 
+_LEVEL_COLOR = {
+    logging.DEBUG: "\x1b[2;37;49m",
+    logging.WARNING: "\x1b[0;33;49m",
+    logging.ERROR: "\x1b[0;31;49m",
+}
+
+
+class _AnsiFormatter(logging.Formatter):
+    def format(self, record):
+        color = _LEVEL_COLOR.get(record.levelno, "")
+        return f"{color}{record.getMessage()}\x1b[0m" if color else record.getMessage()
+
+
+_logger = logging.getLogger("meshtastic_observer.tcp_reader")
+_logger.setLevel(logging.DEBUG)
+_logger.propagate = False
+if not _logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_AnsiFormatter())
+    _logger.addHandler(_handler)
+
 
 class TcpReader:
     """Owns the single upstream TCPInterface connection to the Meshtastic node.
@@ -42,10 +64,10 @@ class TcpReader:
     out from under callers -- always read `reader.iface` fresh, never cache it.
     """
 
-    LOG_DEBUG: Final = 7
-    LOG_ERR: Final = 3
-    LOG_INFO: Final = 6
-    LOG_WARNING: Final = 4
+    LOG_DEBUG: Final = logging.DEBUG
+    LOG_ERR: Final = logging.ERROR
+    LOG_INFO: Final = logging.INFO
+    LOG_WARNING: Final = logging.WARNING
 
     def __init__(self, hostname, port=4403, stop_event=None, verbose=False):
         self.hostname = hostname
@@ -144,14 +166,8 @@ class TcpReader:
             self.iface.close()
 
     def log(self, message, level=LOG_INFO):
-        """Log a message to stdout. Same ANSI-colored style as the other readers."""
-        match level:
-            case self.LOG_DEBUG:
-                if self.verbose:
-                    print(f"\x1b[2;37;49m{message}\x1b[0m")
-            case self.LOG_ERR:
-                print(f"\x1b[0;31;49m{message}\x1b[0m")
-            case self.LOG_INFO:
-                print(message)
-            case self.LOG_WARNING:
-                print(f"\x1b[0;33;49m{message}\x1b[0m")
+        """Log a message, same ANSI-colored style as before -- gate LOG_DEBUG
+        behind --verbose since it's repeater handshake/forwarding detail."""
+        if level == self.LOG_DEBUG and not self.verbose:
+            return
+        _logger.log(level, message)

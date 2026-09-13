@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS "nodes" (
 	"seen"	INTEGER,
 	"latitude"	REAL,
 	"longitude"	REAL,
-	"tracestart"	INTEGER DEFAULT 0,
 	"role"	INTEGER DEFAULT 0,
 	"hardware"	INTEGER DEFAULT 0,
 	PRIMARY KEY("id")

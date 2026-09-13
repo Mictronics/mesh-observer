@@ -27,7 +27,7 @@ import socket
 import socketserver
 import threading
 
-from repeater_core import START1, START2
+from repeater_core import START1, START2, frame
 
 HEADER_LEN = 4
 
@@ -65,10 +65,8 @@ class _Handler(socketserver.BaseRequestHandler):
             msg = session.queue.get()
             if msg is None:
                 return
-            payload = msg.SerializeToString()
-            header = bytes([START1, START2, (len(payload) >> 8) & 0xFF, len(payload) & 0xFF])
             try:
-                self.request.sendall(header + payload)
+                self.request.sendall(frame(msg.SerializeToString()))
             except OSError:
                 return
 

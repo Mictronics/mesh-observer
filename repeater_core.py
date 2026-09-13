@@ -35,6 +35,13 @@ from pubsub import pub
 START1 = 0x94
 START2 = 0xC3
 
+
+def frame(payload: bytes) -> bytes:
+    """Wrap payload in the wire framing shared by both repeater adapters
+    (2 magic bytes + 2-byte big-endian length; see firmware StreamAPI.cpp)."""
+    length = len(payload)
+    return bytes([START1, START2, (length >> 8) & 0xFF, length & 0xFF]) + payload
+
 # Firmware PhoneAPI.h: a want_config_id nonce meaning "skip everything except
 # node_info" -- some clients (e.g. Meshtastic Android) rely on this to fetch
 # just the node list without re-triggering their own handshake-progress state
@@ -74,20 +81,6 @@ class RepeaterCore:
         raw = packet.get("raw")
         if raw is None:
             return
-        # Temporary diagnostic: a client's admin request (e.g. device metadata)
-        # gets forwarded upstream and its reply comes back as a normal packet
-        # addressed to our own node; log those specifically to check they
-        # actually arrive, since that's a plausible reason a strict client
-        # could stall after the handshake.
-        iface = self.reader.iface
-        if iface is not None and iface.myInfo is not None and packet.get("to") == iface.myInfo.my_node_num:
-            portnum = (packet.get("decoded") or {}).get("portnum", "<encrypted>")
-            cached = (iface.nodesByNum.get(packet.get("from")) or {}).get("adminSessionPassKey")
-            self.reader.log(
-                f"Repeater: reply addressed to us arrived (from={packet.get('fromId')}, portnum={portnum}, "
-                f"passkey now cached: {bool(cached)}, len={len(cached) if cached else 0})",
-                level=self.reader.LOG_DEBUG,
-            )
         from_radio = mesh_pb2.FromRadio(packet=raw)
         with self._sessions_lock:
             sessions = list(self._sessions)
@@ -162,11 +155,9 @@ class RepeaterCore:
         iface = self.reader.iface
         if iface is None or iface.socket is None:
             return
-        length = len(raw_bytes)
-        header = bytes([START1, START2, (length >> 8) & 0xFF, length & 0xFF])
         try:
             with self._upstream_lock:
-                iface.socket.sendall(header + raw_bytes)
+                iface.socket.sendall(frame(raw_bytes))
         except Exception as ex:
             self.reader.log(f"Repeater: failed forwarding to node: {ex}", level=self.reader.LOG_WARNING)
 

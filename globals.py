@@ -33,8 +33,6 @@ module_count = {
     "HostMetrics": 0,
     "AirQuality": 0,
     "HealthTelemetry": 0,
-    "StoreForward": 0,
-    "ExternalNotificationModule": 0,
     "admin": 0,
     "routing": 0,
     "traceroute": 0,
@@ -45,5 +43,4 @@ module_count = {
     "startlog": None,
     "decoded": 0,
     "encrypted": 0,
-    "time": 0,
 }

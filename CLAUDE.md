@@ -44,7 +44,7 @@ python3 meshtastic_observer.py -g
 # One-shot: (re)generate web/index.html + stat graphs from DB, then exit
 python3 meshtastic_observer.py -s
 
-# Print the version string (2.0.0) and exit
+# Print the version string (2.0.1) and exit
 python3 meshtastic_observer.py --version
 ```
 
@@ -56,8 +56,9 @@ repeater binds to) -- see README.md for the exact template.
 
 For FTP upload of the generated `web/` folder, create `ftp_credentials.py` (gitignored, not present
 in repo) exporting `__hostname__`, `__username__`, `__password__`, `__local_folder__`,
-`__remote_folder__` -- see README.md for the exact template. Without it, `ftp_upload()` calls in
-`hourlyRunner`/`dailyRunner` will fail; comment them out if FTP isn't wanted.
+`__remote_folder__` -- see README.md for the exact template. `ftp_upload()` imports it lazily
+inside its own try/except, so a missing file just logs an error and skips the upload -- no need
+to comment anything out if FTP isn't wanted.
 
 There is no linter invocation or build step beyond running the script directly. A `pytest` suite
 under `tests/` covers the packet-to-database-write logic (`tests/test_tcp_packet_handling.py`),
@@ -161,8 +162,7 @@ invocations -- must hold `Globals.getInstance().getLock()`.
 
 **Database** (`network.sqlite3`, schema in `network.sqlite3.sql`) -- unchanged by the TCP/repeater
 rework:
-- `nodes` -- one row per known node ID, with names, last-seen timestamp, position, role, hardware,
-  and a `tracestart` counter.
+- `nodes` -- one row per known node ID, with names, last-seen timestamp, position, role, hardware.
 - `links` -- directed edges between node IDs seen in traceroute output, with SNR; a trigger
   auto-deletes rows older than 24h on every insert. Traceroute now writes the full hop-by-hop chain
   (real node numbers from the decoded `RouteDiscovery`, not just the two endpoints), since the TCP

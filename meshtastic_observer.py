@@ -50,7 +50,7 @@ from tcp_repeater import TcpRepeaterServer
 __author__ = "Michael Wolf aka Mictronics"
 __copyright__ = "2025, (C) Michael Wolf"
 __license__ = "GPL v3+"
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 DATABASE_FILE = "network.sqlite3"
 CHART_COLOR = "limegreen"
@@ -218,14 +218,12 @@ def statistics(hourly=False):
                 ("Device Telemetry", "DeviceTelemetry"),
                 ("Environment Telemetry", "EnvironmentTelemetry"),
                 ("Host Metrics", "HostMetrics"),
-                ("Store Forward", "StoreForward"),
                 ("Power Telemetry", "PowerTelemetry"),
                 ("Traceroute", "traceroute"),
                 ("Position", "position"),
                 ("NodeInfo", "nodeinfo"),
                 ("Text", "text msg"),
                 ("Waypoint", "waypoint msg"),
-                ("External Notification", "ExternalNotificationModule"),
                 ("Air Quality", "AirQuality"),
                 ("Admin", "admin"),
             ]
@@ -658,7 +656,7 @@ def _upsert_node(database, lock, node_id, shortname=None, longname=None, role=No
     with lock:
         cur = database.cursor()
         cur.executemany(
-            "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, 0, coalesce(:role, 0), coalesce(:hw, 0)) "
+            "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, coalesce(:role, 0), coalesce(:hw, 0)) "
             "ON CONFLICT(id) DO UPDATE SET shortname=coalesce(:shortname, shortname), "
             "longname=coalesce(:longname, longname), seen=strftime('%s','now'), "
             "role=coalesce(:role, role), hardware=coalesce(:hw, hardware);",
@@ -779,7 +777,7 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                     [{"source": src, "destination": dst, "snr": snr}],
                 )
                 cur.executemany(
-                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
+                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
                     ({"id": src},),
                 )
             database.commit()
