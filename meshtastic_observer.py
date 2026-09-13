@@ -98,6 +98,13 @@ def initArgParser():
         action="store_true",
     )
 
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        help="Include LOG_DEBUG messages (repeater handshake/forwarding detail) in log output",
+        action="store_true",
+    )
+
     parser.add_argument("--version", action="version", version=f"{__version__}")
 
     g.args = parser.parse_args()
@@ -939,7 +946,9 @@ def main():
     # Connect to the Meshtastic node's TCP API (see tcp_credentials.py)
     import tcp_credentials
 
-    reader = TcpReader(tcp_credentials.__hostname__, tcp_credentials.__port__, ev_run)
+    reader = TcpReader(
+        tcp_credentials.__hostname__, tcp_credentials.__port__, ev_run, verbose=args.verbose
+    )
 
     g.reader = reader  # Store reader in globals for other threads
 

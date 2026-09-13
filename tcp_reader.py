@@ -47,9 +47,10 @@ class TcpReader:
     LOG_INFO: Final = 6
     LOG_WARNING: Final = 4
 
-    def __init__(self, hostname, port=4403, stop_event=None):
+    def __init__(self, hostname, port=4403, stop_event=None, verbose=False):
         self.hostname = hostname
         self.port = port
+        self.verbose = verbose
         self.iface = None
         self._closing = False
         # Also honor the app-wide stop event so a connect-retry loop against an
@@ -146,7 +147,8 @@ class TcpReader:
         """Log a message to stdout. Same ANSI-colored style as the other readers."""
         match level:
             case self.LOG_DEBUG:
-                print(f"\x1b[2;37;49m{message}\x1b[0m")
+                if self.verbose:
+                    print(f"\x1b[2;37;49m{message}\x1b[0m")
             case self.LOG_ERR:
                 print(f"\x1b[0;31;49m{message}\x1b[0m")
             case self.LOG_INFO:
