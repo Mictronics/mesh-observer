@@ -50,7 +50,7 @@ from tcp_repeater import TcpRepeaterServer
 __author__ = "Michael Wolf aka Mictronics"
 __copyright__ = "2025, (C) Michael Wolf"
 __license__ = "GPL v3+"
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 
 DATABASE_FILE = "network.sqlite3"
 CHART_COLOR = "limegreen"
