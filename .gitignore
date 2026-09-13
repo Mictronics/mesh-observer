@@ -8,6 +8,7 @@ seaborn_test.py
 gini.py
 ftp_credentials.py
 mqtt_credentials.py
+tcp_credentials.py
 *.code-workspace
 network.sqlite3
 *.png
