@@ -50,7 +50,7 @@ from tcp_repeater import TcpRepeaterServer
 __author__ = "Michael Wolf aka Mictronics"
 __copyright__ = "2026, (C) Michael Wolf"
 __license__ = "GPL v3+"
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 DATABASE_FILE = "network.sqlite3"
 CHART_COLOR = "limegreen"
@@ -758,8 +758,13 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
         if lat != 0 or lon != 0:
             with lock:
                 cur = database.cursor()
+                # Upsert, not UPDATE OR IGNORE -- a node whose first-ever packet we
+                # see is a position report has no row yet, and a plain UPDATE would
+                # silently drop it (unlike NODEINFO_APP/TRACEROUTE_APP, which both
+                # create the row via _upsert_node).
                 cur.executemany(
-                    "UPDATE OR IGNORE nodes SET seen = strftime('%s','now'), latitude = :lat, longitude = :lon WHERE id = :id;",
+                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), :lat, :lon, 0, 0) "
+                    "ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now'), latitude=:lat, longitude=:lon;",
                     [{"id": from_id, "lat": lat, "lon": lon}],
                 )
                 database.commit()

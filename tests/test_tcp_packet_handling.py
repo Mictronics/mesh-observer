@@ -143,6 +143,19 @@ class TestHandleTcpPacket:
         row = db.execute("SELECT latitude, longitude FROM nodes WHERE id = 1").fetchone()
         assert row == (50.0, 10.0)
 
+    def test_position_creates_node_row_when_unknown(self):
+        db = make_db()  # no pre-seeded node row -- position is the node's first packet
+        packet = {
+            "from": 99,
+            "decoded": {
+                "portnum": "POSITION_APP",
+                "position": {"latitudeI": 500000000, "longitudeI": 100000000},
+            },
+        }
+        handle(db, packet)
+        row = db.execute("SELECT latitude, longitude FROM nodes WHERE id = 99").fetchone()
+        assert row == (50.0, 10.0)
+
     def test_zero_position_is_ignored(self):
         db = make_db()
         db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, 12.0, 34.0, 0, 0)", (1,))
