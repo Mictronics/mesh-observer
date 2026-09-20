@@ -86,6 +86,14 @@ TELEMETRY_PORTS = {
 }
 
 
+def _strip_unrenderable(text):
+    """Drop emoji/symbol chars DejaVu Sans (matplotlib's default font) has no
+    glyph for -- node long names are user-set and often contain them. HTML
+    output keeps the original longname column; only chart labels go through
+    this."""
+    return "".join(c for c in str(text) if ord(c) <= 0xFFFF)
+
+
 def initArgParser():
     """Initialize the command line argument parsing."""
     parser = g.parser
@@ -426,6 +434,7 @@ def statistics(hourly=False):
             ascending=False
         )
         if not airtime.empty:
+            airtime.index = airtime.index.map(_strip_unrenderable)
             plt.figure(figsize=(8, max(4, 0.3 * len(airtime))))
             airtime_plot = sns.barplot(x=airtime.values, y=airtime.index, color=CHART_COLOR, orient="h")
             airtime_plot.set_xlabel("Kanalauslastung TX (%)")
@@ -438,6 +447,7 @@ def statistics(hourly=False):
         # Create average RX SNR per node graph (weak-link indicator, worst first)
         snr = packets.dropna(subset=["rx_snr"]).groupby("longname")["rx_snr"].mean().sort_values()
         if not snr.empty:
+            snr.index = snr.index.map(_strip_unrenderable)
             plt.figure(figsize=(8, max(4, 0.3 * len(snr))))
             snr_plot = sns.barplot(x=snr.values, y=snr.index, color=CHART_COLOR, orient="h")
             snr_plot.set_xlabel("Ø SNR (dB)")
@@ -485,7 +495,7 @@ def statistics(hourly=False):
             node_plot.set(autoscalex_on=True)
             node_plot.set_xticklabels(rotation=45, ha="right", step=2)
             node_plot.set(
-                title=f"{long_name} / {node_id:08X} / Mesh Last: {load:0.2f}%"
+                title=f"{_strip_unrenderable(long_name)} / {node_id:08X} / Mesh Last: {load:0.2f}%"
             )
             # Calculate mean interval for each packet type of a single node
             delta_t_stats = {}
