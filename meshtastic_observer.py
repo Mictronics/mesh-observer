@@ -932,8 +932,8 @@ def scheduleRunner():
     ev_run = g.ev_run
     if ev_run is None:
         return  # No event to run, exit the thread
-    schedule.every().hour.at(":05").do(hourlyRunner)
-    schedule.every(3).hours.at("15:00", LOCAL_TIMEZONE).do(dailyRunner)
+    schedule.every().hour.at(":15", LOCAL_TIMEZONE).do(hourlyRunner)
+    schedule.every(3).hours.at("05:00", LOCAL_TIMEZONE).do(dailyRunner)
     reader.log("Scheduler started", level=reader.LOG_INFO)
     while ev_run.is_set():
         schedule.run_pending()
