@@ -25,12 +25,22 @@ def make_db():
         CREATE TABLE nodes (
             id INTEGER NOT NULL, shortname TEXT, longname TEXT, seen INTEGER,
             latitude REAL, longitude REAL,
-            role INTEGER DEFAULT 0, hardware INTEGER DEFAULT 0, PRIMARY KEY(id)
+            role INTEGER DEFAULT 0, hardware INTEGER DEFAULT 0,
+            public_key TEXT, PRIMARY KEY(id)
         );
         CREATE TABLE packets (
             source INTEGER, type INTEGER, time INTEGER,
             hops_used INTEGER, rx_snr REAL, rx_rssi INTEGER,
-            channel_util REAL, air_util_tx REAL
+            channel_util REAL, air_util_tx REAL, hop_start INTEGER
+        );
+        CREATE TABLE link_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source INTEGER NOT NULL, destination INTEGER NOT NULL,
+            snr REAL, trace_id INTEGER, seen INTEGER NOT NULL
+        );
+        CREATE TABLE security_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL, node_id INTEGER, detail TEXT, seen INTEGER NOT NULL
         );
         """
     )
@@ -131,7 +141,7 @@ class TestHandleTcpPacket:
 
     def test_position_updates_lat_lon(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, NULL, NULL, 0, 0)", (1,))
+        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, NULL, NULL, 0, 0, NULL)", (1,))
         packet = {
             "from": 1,
             "decoded": {
@@ -158,7 +168,7 @@ class TestHandleTcpPacket:
 
     def test_zero_position_is_ignored(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, 12.0, 34.0, 0, 0)", (1,))
+        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, 12.0, 34.0, 0, 0, NULL)", (1,))
         packet = {
             "from": 1,
             "decoded": {"portnum": "POSITION_APP", "position": {"latitudeI": 0, "longitudeI": 0}},
@@ -197,7 +207,7 @@ class TestHandleTcpPacket:
 
     def test_own_node_position_and_telemetry_do_not_inflate_module_count(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (42, NULL, NULL, 0, NULL, NULL, 0, 0)")
+        db.execute("INSERT INTO nodes VALUES (42, NULL, NULL, 0, NULL, NULL, 0, 0, NULL)")
         position_counts = handle(
             db,
             {"from": 42, "decoded": {"portnum": "POSITION_APP", "position": {"latitudeI": 500000000, "longitudeI": 100000000}}},
@@ -279,3 +289,86 @@ class TestHandleTcpPacket:
         packet = {"from": 1, "decoded": {"portnum": "UNKNOWN_APP"}}
         handle(db, packet)
         assert db.execute("SELECT count(*) FROM packets").fetchone()[0] == 0
+
+    def test_nodeinfo_upserts_public_key(self):
+        db = make_db()
+        packet = {
+            "from": 1,
+            "decoded": {"portnum": "NODEINFO_APP", "user": {"shortName": "A", "publicKey": "AAAAAAAA"}},
+        }
+        handle(db, packet)
+        row = db.execute("SELECT public_key FROM nodes WHERE id = 1").fetchone()
+        assert row == ("AAAAAAAA",)
+
+    def test_nodeinfo_key_change_logs_key_mismatch(self):
+        db = make_db()
+        db.execute("INSERT INTO nodes VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, 'AAAAAAAA')")
+        packet = {"from": 1, "decoded": {"portnum": "NODEINFO_APP", "user": {"publicKey": "BBBBBBBB"}}}
+        handle(db, packet)
+        row = db.execute("SELECT kind, node_id FROM security_events").fetchone()
+        assert row == ("key_mismatch", 1)
+
+    def test_nodeinfo_same_key_does_not_log_mismatch(self):
+        db = make_db()
+        db.execute("INSERT INTO nodes VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, 'AAAAAAAA')")
+        packet = {"from": 1, "decoded": {"portnum": "NODEINFO_APP", "user": {"publicKey": "AAAAAAAA"}}}
+        handle(db, packet)
+        assert db.execute("SELECT count(*) FROM security_events").fetchone()[0] == 0
+
+    def test_traceroute_writes_link_history_with_trace_id(self):
+        db = make_db()
+        packet = {
+            "from": 1,
+            "to": 4,
+            "id": 0x1234,
+            "decoded": {"portnum": "TRACEROUTE_APP", "traceroute": {"route": [2, 3], "snrTowards": [40, 20, 8]}},
+        }
+        handle(db, packet)
+        rows = sorted(db.execute("SELECT source, destination, snr, trace_id FROM link_history").fetchall())
+        assert rows == [(1, 2, 10.0, 0x1234), (2, 3, 5.0, 0x1234), (3, 4, 2.0, 0x1234)]
+
+    def test_hop_start_persisted_on_packets(self):
+        db = make_db()
+        packet = {
+            "from": 1,
+            "hopStart": 5,
+            "hopLimit": 2,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP"},
+        }
+        handle(db, packet)
+        row = db.execute("SELECT hop_start FROM packets").fetchone()
+        assert row == (5,)
+
+    def test_spoofed_own_node_packet_logs_security_event(self):
+        import globals as g
+
+        g.sent_packet_ids.clear()
+        db = make_db()
+        packet = {
+            "from": 42,
+            "id": 0x999,
+            "hopStart": 3,
+            "hopLimit": 1,
+            "rxSnr": 5.0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP"},
+        }
+        handle(db, packet, own_node_num=42)
+        row = db.execute("SELECT kind, node_id FROM security_events").fetchone()
+        assert row == ("spoofed_packet", 42)
+
+    def test_own_node_packet_with_known_sent_id_is_not_spoofed(self):
+        import globals as g
+
+        g.sent_packet_ids.clear()
+        g.sent_packet_ids.append(0x999)
+        db = make_db()
+        packet = {
+            "from": 42,
+            "id": 0x999,
+            "hopStart": 3,
+            "hopLimit": 1,
+            "rxSnr": 5.0,
+            "decoded": {"portnum": "TEXT_MESSAGE_APP"},
+        }
+        handle(db, packet, own_node_num=42)
+        assert db.execute("SELECT count(*) FROM security_events").fetchone()[0] == 0

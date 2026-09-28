@@ -32,6 +32,8 @@ from google.protobuf import json_format
 from meshtastic.protobuf import admin_pb2, config_pb2, mesh_pb2, module_config_pb2, portnums_pb2
 from pubsub import pub
 
+import globals as g
+
 START1 = 0x94
 START2 = 0xC3
 
@@ -105,6 +107,11 @@ class RepeaterCore:
         detail = ""
         if kind == "packet":
             p = to_radio.packet
+            # ponytail: deque append/contains from multiple client threads
+            # without a lock -- both are atomic under the GIL, and a rare
+            # missed id only costs a missed spoof-detection edge case, not
+            # repeater correctness. Per-session lock if that ever changes.
+            g.sent_packet_ids.append(p.id)
             if p.HasField("decoded"):
                 portnum = portnums_pb2.PortNum.Name(p.decoded.portnum)
                 if portnum == "ADMIN_APP":

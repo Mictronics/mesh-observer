@@ -21,11 +21,18 @@ A module is already a singleton (Python caches it after first import), so
 plain module-level attributes replace the earlier hand-rolled Singleton class.
 """
 
+import collections
+
 args = None
 parser = None
 lock = None
 reader = None
 ev_run = None
+# Packet ids this project itself sent upstream via the repeater (see
+# repeater_core.py), used to tell a real relayed packet from our own node
+# apart from one spoofing our node number. Bounded ring buffer, not a set --
+# exact dedup isn't needed, just "recently sent by us".
+sent_packet_ids = collections.deque(maxlen=256)
 module_count = {
     "DeviceTelemetry": 0,
     "EnvironmentTelemetry": 0,

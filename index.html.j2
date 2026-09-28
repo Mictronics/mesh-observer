@@ -52,6 +52,21 @@
         <div class="p-1">Modem Voreinstellung: MediumFast</div>
     </div>
 
+    {% if issues %}
+    <div class="container mb-3">
+        <h1 class="display-6">Erkannte Mesh-Probleme</h1>
+        <p>Automatisierte Analyse von Netzwerk-Topologie, Verkehr und Sicherheit im Messzeitraum.</p>
+        <ul class="list-group">
+            {% for issue in issues %}
+                <li class="list-group-item d-flex justify-content-between align-items-start">
+                    <span>{{ issue.message }}</span>
+                    <span class="badge {% if issue.severity == 'critical' %}bg-danger{% elif issue.severity == 'warning' %}bg-warning text-dark{% else %}bg-info text-dark{% endif %} ms-2">{{ issue.severity }}</span>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
     <div class="container float-start">
         <p><a class="icon-link" href="./visualization.html">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-share-fill" viewBox="0 0 16 16">

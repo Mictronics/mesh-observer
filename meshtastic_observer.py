@@ -42,6 +42,7 @@ from meshtastic.protobuf import config_pb2, mesh_pb2, portnums_pb2
 from pubsub import pub
 
 import globals as g
+import mesh_issues
 from http_repeater import HttpRepeaterServer
 from repeater_core import RepeaterCore
 from tcp_reader import TcpReader
@@ -50,7 +51,7 @@ from tcp_repeater import TcpRepeaterServer
 __author__ = "Michael Wolf aka Mictronics"
 __copyright__ = "2026, (C) Michael Wolf"
 __license__ = "GPL v3+"
-__version__ = "2.1.2"
+__version__ = "2.2.0"
 
 DATABASE_FILE = "network.sqlite3"
 CHART_COLOR = "limegreen"
@@ -84,6 +85,57 @@ TELEMETRY_PORTS = {
     "localStats": (518, "LocalStats"),
     "trafficManagementStats": (519, "TrafficManagementStats"),
 }
+
+
+def _ensure_schema(db_path=DATABASE_FILE):
+    """Idempotent in-place upgrade for an already-populated DB from an earlier
+    version -- network.sqlite3.sql is the source of truth for fresh installs
+    (create_database.py); this covers upgrading a live one without a restore.
+    """
+    conn = sqlite3.connect(db_path)
+    for stmt in (
+        "ALTER TABLE nodes ADD COLUMN public_key TEXT",
+        "ALTER TABLE packets ADD COLUMN hop_start INTEGER",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # column already exists
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS "link_history" (
+            "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+            "source" INTEGER NOT NULL,
+            "destination" INTEGER NOT NULL,
+            "snr" REAL,
+            "trace_id" INTEGER,
+            "seen" INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS "security_events" (
+            "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+            "kind" TEXT NOT NULL,
+            "node_id" INTEGER,
+            "detail" TEXT,
+            "seen" INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS "idx_link_history_seen" ON "link_history" ("seen");
+        CREATE INDEX IF NOT EXISTS "idx_link_history_edge" ON "link_history" ("source","destination");
+        CREATE INDEX IF NOT EXISTS "idx_link_history_trace" ON "link_history" ("trace_id");
+        CREATE INDEX IF NOT EXISTS "idx_security_events_seen" ON "security_events" ("seen");
+        CREATE TRIGGER IF NOT EXISTS delete_old_link_history
+        AFTER INSERT ON link_history
+        BEGIN
+            DELETE FROM link_history WHERE seen < (strftime('%s', 'now') - 1209600);
+        END;
+        CREATE TRIGGER IF NOT EXISTS delete_old_security_events
+        AFTER INSERT ON security_events
+        BEGIN
+            DELETE FROM security_events WHERE seen < (strftime('%s', 'now') - 604800);
+        END;
+        """
+    )
+    conn.commit()
+    conn.close()
 
 
 def _strip_unrenderable(text):
@@ -335,6 +387,7 @@ def statistics(hourly=False):
                 .dt.tz_localize("UTC")
                 .dt.tz_convert(LOCAL_TIMEZONE)
             )
+            issues = mesh_issues.analyze(database)
 
         # Set global plot parameters
         plt.set_loglevel("WARNING")
@@ -546,6 +599,7 @@ def statistics(hourly=False):
             last_update=now_str,
             link_count=link_count,
             node_count=node_count,
+            issues=issues,
         )
         # Save generated web content
         index_file = os.getcwd() + "/web/index.html"
@@ -646,12 +700,21 @@ def graph(full=False):
 
 
 def _insert_packet(
-    database, lock, source_id, port_num, hops_used=None, rx_snr=None, rx_rssi=None, channel_util=None, air_util_tx=None
+    database,
+    lock,
+    source_id,
+    port_num,
+    hops_used=None,
+    rx_snr=None,
+    rx_rssi=None,
+    channel_util=None,
+    air_util_tx=None,
+    hop_start=None,
 ):
     with lock:
         cur = database.cursor()
         cur.executemany(
-            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'), :hops_used, :rx_snr, :rx_rssi, :channel_util, :air_util_tx);",
+            "INSERT OR REPLACE INTO packets VALUES(:id, :type, strftime('%s','now'), :hops_used, :rx_snr, :rx_rssi, :channel_util, :air_util_tx, :hop_start);",
             [
                 {
                     "id": source_id,
@@ -661,6 +724,7 @@ def _insert_packet(
                     "rx_rssi": rx_rssi,
                     "channel_util": channel_util,
                     "air_util_tx": air_util_tx,
+                    "hop_start": hop_start,
                 }
             ],
         )
@@ -668,17 +732,40 @@ def _insert_packet(
         cur.close()
 
 
-def _upsert_node(database, lock, node_id, shortname=None, longname=None, role=None, hw=None):
-    # role/hw default to None (not 0) so a bare "seen" touch (e.g. from a
-    # traceroute endpoint) never clobbers an already-known node's role/hardware.
+def _upsert_node(
+    database, lock, node_id, shortname=None, longname=None, role=None, hw=None, public_key=None
+):
+    # role/hw/public_key default to None (not 0/'') so a bare "seen" touch
+    # (e.g. from a traceroute endpoint) never clobbers already-known values.
     with lock:
         cur = database.cursor()
         cur.executemany(
-            "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, coalesce(:role, 0), coalesce(:hw, 0)) "
+            "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, coalesce(:role, 0), coalesce(:hw, 0), :public_key) "
             "ON CONFLICT(id) DO UPDATE SET shortname=coalesce(:shortname, shortname), "
             "longname=coalesce(:longname, longname), seen=strftime('%s','now'), "
-            "role=coalesce(:role, role), hardware=coalesce(:hw, hardware);",
-            [{"id": node_id, "shortname": shortname, "longname": longname, "role": role, "hw": hw}],
+            "role=coalesce(:role, role), hardware=coalesce(:hw, hardware), "
+            "public_key=coalesce(:public_key, public_key);",
+            [
+                {
+                    "id": node_id,
+                    "shortname": shortname,
+                    "longname": longname,
+                    "role": role,
+                    "hw": hw,
+                    "public_key": public_key,
+                }
+            ],
+        )
+        database.commit()
+        cur.close()
+
+
+def _insert_security_event(database, lock, kind, node_id, detail=None):
+    with lock:
+        cur = database.cursor()
+        cur.execute(
+            "INSERT INTO security_events (kind, node_id, detail, seen) VALUES (?, ?, ?, strftime('%s','now'));",
+            (kind, node_id, detail),
         )
         database.commit()
         cur.close()
@@ -744,8 +831,33 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
     rx_snr = packet.get("rxSnr")
     rx_rssi = packet.get("rxRssi")
 
+    # A packet claiming to be from our own node but bearing RF-reception
+    # markers (relayed, so hop budget was spent) and an id we never actually
+    # sent ourselves (see g.sent_packet_ids, populated in repeater_core.py) is
+    # someone else on the mesh impersonating our node number.
+    packet_id = packet.get("id")
+    if (
+        is_own
+        and rx_snr is not None
+        and hop_start is not None
+        and hop_limit is not None
+        and hop_start > hop_limit
+        and packet_id not in g.sent_packet_ids
+    ):
+        _insert_security_event(database, lock, "spoofed_packet", from_id, f"packet id {packet_id}")
+
     if portnum == "NODEINFO_APP":
         user = decoded.get("user", {})
+        public_key = user.get("publicKey")
+        if public_key:
+            with lock:
+                cur = database.cursor()
+                cur.execute("SELECT public_key FROM nodes WHERE id = ?", (from_id,))
+                row = cur.fetchone()
+                cur.close()
+            old_key = row[0] if row else None
+            if old_key and old_key != public_key:
+                _insert_security_event(database, lock, "key_mismatch", from_id, f"{old_key} -> {public_key}")
         _upsert_node(
             database,
             lock,
@@ -754,10 +866,20 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
             longname=user.get("longName"),
             role=_enum_int(config_pb2.Config.DeviceConfig.Role, user.get("role")),
             hw=_enum_int(mesh_pb2.HardwareModel, user.get("hwModel")),
+            public_key=public_key,
         )
         if not is_own:
             module_count["nodeinfo"] += 1
-            _insert_packet(database, lock, from_id, PORT_NUM_NODEINFO, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+            _insert_packet(
+                database,
+                lock,
+                from_id,
+                PORT_NUM_NODEINFO,
+                hops_used=hops_used,
+                rx_snr=rx_snr,
+                rx_rssi=rx_rssi,
+                hop_start=hop_start,
+            )
 
     elif portnum == "POSITION_APP":
         position = decoded.get("position", {})
@@ -773,7 +895,7 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                 # silently drop it (unlike NODEINFO_APP/TRACEROUTE_APP, which both
                 # create the row via _upsert_node).
                 cur.executemany(
-                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), :lat, :lon, 0, 0) "
+                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), :lat, :lon, 0, 0, NULL) "
                     "ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now'), latitude=:lat, longitude=:lon;",
                     [{"id": from_id, "lat": lat, "lon": lon}],
                 )
@@ -781,7 +903,7 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                 cur.close()
         if not is_own:
             module_count["position"] += 1
-            _insert_packet(database, lock, from_id, PORT_NUM_POSITION, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+            _insert_packet(database, lock, from_id, PORT_NUM_POSITION, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi, hop_start=hop_start)
 
     elif portnum == "TRACEROUTE_APP":
         traceroute = decoded.get("traceroute", {})
@@ -802,7 +924,12 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                     [{"source": src, "destination": dst, "snr": snr}],
                 )
                 cur.executemany(
-                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
+                    "INSERT INTO link_history (source, destination, snr, trace_id, seen) "
+                    "VALUES (:source, :destination, :snr, :trace_id, strftime('%s','now'));",
+                    [{"source": src, "destination": dst, "snr": snr, "trace_id": packet.get("id")}],
+                )
+                cur.executemany(
+                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, NULL) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
                     ({"id": src},),
                 )
             database.commit()
@@ -810,7 +937,7 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
         _upsert_node(database, lock, from_id)
         if not is_own:
             module_count["traceroute"] += 1
-            _insert_packet(database, lock, from_id, PORT_NUM_TRACEROUTE, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+            _insert_packet(database, lock, from_id, PORT_NUM_TRACEROUTE, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi, hop_start=hop_start)
 
     elif portnum == "TELEMETRY_APP":
         telemetry = decoded.get("telemetry", {})
@@ -828,22 +955,23 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                 rx_rssi=rx_rssi,
                 channel_util=device_metrics.get("channelUtilization"),
                 air_util_tx=device_metrics.get("airUtilTx"),
+                hop_start=hop_start,
             )
 
     elif portnum == "TEXT_MESSAGE_APP":
         if not is_own:
             module_count["text msg"] += 1
-            _insert_packet(database, lock, from_id, PORT_NUM_TEXT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+            _insert_packet(database, lock, from_id, PORT_NUM_TEXT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi, hop_start=hop_start)
 
     elif portnum == "WAYPOINT_APP":
         if not is_own:
             module_count["waypoint msg"] += 1
-            _insert_packet(database, lock, from_id, PORT_NUM_WAYPOINT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+            _insert_packet(database, lock, from_id, PORT_NUM_WAYPOINT, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi, hop_start=hop_start)
 
     elif portnum == "ADMIN_APP":
         if not is_own:
             module_count["admin"] += 1
-            _insert_packet(database, lock, from_id, PORT_NUM_ADMIN, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+            _insert_packet(database, lock, from_id, PORT_NUM_ADMIN, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi, hop_start=hop_start)
 
     else:
         # Any other real portnum (see network.sqlite3.sql's packet_types for
@@ -852,7 +980,7 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
         port_num = _enum_int(portnums_pb2.PortNum, portnum, portnums_pb2.PortNum.UNKNOWN_APP)
         if port_num != portnums_pb2.PortNum.UNKNOWN_APP and not is_own:
             module_count[portnum] = module_count.get(portnum, 0) + 1
-            _insert_packet(database, lock, from_id, port_num, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi)
+            _insert_packet(database, lock, from_id, port_num, hops_used=hops_used, rx_snr=rx_snr, rx_rssi=rx_rssi, hop_start=hop_start)
 
 
 def tcpListener():
@@ -962,6 +1090,8 @@ def main():
     g.parser = parser
     initArgParser()
     args = g.args
+
+    _ensure_schema()
 
     if args.graph:
         graph(full=True)

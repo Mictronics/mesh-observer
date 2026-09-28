@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS "nodes" (
 	"longitude"	REAL,
 	"role"	INTEGER DEFAULT 0,
 	"hardware"	INTEGER DEFAULT 0,
+	"public_key"	TEXT,
 	PRIMARY KEY("id")
 );
 CREATE TABLE IF NOT EXISTS "packet_types" (
@@ -30,10 +31,30 @@ CREATE TABLE IF NOT EXISTS "packets" (
 	"rx_snr"	REAL,
 	"rx_rssi"	INTEGER,
 	"channel_util"	REAL,
-	"air_util_tx"	REAL
+	"air_util_tx"	REAL,
+	"hop_start"	INTEGER
+);
+CREATE TABLE IF NOT EXISTS "link_history" (
+	"id"	INTEGER PRIMARY KEY AUTOINCREMENT,
+	"source"	INTEGER NOT NULL,
+	"destination"	INTEGER NOT NULL,
+	"snr"	REAL,
+	"trace_id"	INTEGER,
+	"seen"	INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS "security_events" (
+	"id"	INTEGER PRIMARY KEY AUTOINCREMENT,
+	"kind"	TEXT NOT NULL,
+	"node_id"	INTEGER,
+	"detail"	TEXT,
+	"seen"	INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS "idx_links_seen" ON "links" ("seen");
 CREATE INDEX IF NOT EXISTS "idx_packets_time" ON "packets" ("time");
+CREATE INDEX IF NOT EXISTS "idx_link_history_seen" ON "link_history" ("seen");
+CREATE INDEX IF NOT EXISTS "idx_link_history_edge" ON "link_history" ("source","destination");
+CREATE INDEX IF NOT EXISTS "idx_link_history_trace" ON "link_history" ("trace_id");
+CREATE INDEX IF NOT EXISTS "idx_security_events_seen" ON "security_events" ("seen");
 INSERT OR REPLACE INTO "packet_types" VALUES (0,'Unkown');
 INSERT OR REPLACE INTO "packet_types" VALUES (1,'Text');
 INSERT OR REPLACE INTO "packet_types" VALUES (2,'Remote Hardware');
@@ -93,5 +114,17 @@ AFTER INSERT ON packets
 BEGIN
     DELETE FROM packets
     WHERE time < (strftime('%s', 'now') - 604800);
+END;
+CREATE TRIGGER delete_old_link_history
+AFTER INSERT ON link_history
+BEGIN
+    DELETE FROM link_history
+    WHERE seen < (strftime('%s', 'now') - 1209600);
+END;
+CREATE TRIGGER delete_old_security_events
+AFTER INSERT ON security_events
+BEGIN
+    DELETE FROM security_events
+    WHERE seen < (strftime('%s', 'now') - 604800);
 END;
 COMMIT;
