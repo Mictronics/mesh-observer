@@ -53,10 +53,10 @@
     </div>
 
     {% if issues %}
-    <div class="container mb-3">
+    <div class="container float-start mb-3">
         <h1 class="display-6">Erkannte Mesh-Probleme</h1>
         <p>Automatisierte Analyse von Netzwerk-Topologie, Verkehr und Sicherheit im Messzeitraum.</p>
-        <ul class="list-group">
+        <ul class="list-group lh-sm">
             {% for issue in issues %}
                 <li class="list-group-item d-flex justify-content-between align-items-start">
                     <span>{{ issue.message }}</span>
