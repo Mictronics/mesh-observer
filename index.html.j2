@@ -97,6 +97,10 @@
         <img src="snr.png" class="img-fluid" alt="Empfangsqualität pro Knoten (SNR)">
         <p>Die Grafik zeigt das mittlere SNR (Signal-Rausch-Verhältnis) pro Knoten beim letzten Hop zu diesem Empfänger,
            sortiert vom schwächsten zum stärksten Signal. Niedrige Werte markieren Knoten mit schwacher Anbindung.</p>
+        <img src="node_age.png" class="img-fluid" alt="Altersverteilung der Knoten">
+        <p>Die Grafik zeigt, wie lange die erfassten Knoten (alle in der Datenbank) bereits bekannt sind, gerechnet ab der ersten Sichtung.
+           Alte Knoten bilden das stabile Rückgrat des Mesh, junge Knoten sind neu oder nur kurz aktiv. Knoten, die schon vor Einführung
+           dieser Erfassung bekannt waren, zählen ab dem Zeitpunkt ihrer letzten Sichtung.</p>
         <h1 class="display-6">Top 10</h1>
         <p>Die Top 10 zeigt die Knoten mit der höchsten Packetanzahl unabhängig vom Typ und in Abhängigkeit vom Packettyp an.</p>
         <div class="row">
@@ -153,6 +157,7 @@
                     <div class="hstack gap-3">
                         <div class="p-2">Mesh Last: {{ node.load }}%</div>
                         <div class="p-2">Packete: {{ node.packet_count }}</div>
+                        <div class="p-2">Erstmals gesehen: {{ node.first_seen }}</div>
                     </div>
                 </div>
                 <img src="./images/{{ node.id }}.png" class="card-img-bottom" alt="{{ node.long_name }}" style="width: min-content;">

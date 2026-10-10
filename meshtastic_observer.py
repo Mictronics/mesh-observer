@@ -51,7 +51,7 @@ from tcp_repeater import TcpRepeaterServer
 __author__ = "Michael Wolf aka Mictronics"
 __copyright__ = "2026, (C) Michael Wolf"
 __license__ = "GPL v3+"
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 DATABASE_FILE = "network.sqlite3"
 CHART_COLOR = "limegreen"
@@ -87,6 +87,12 @@ TELEMETRY_PORTS = {
 }
 
 
+def _fmt_first_seen(ts, now):
+    if ts is None:
+        return "unbekannt"
+    return f"{datetime.datetime.fromtimestamp(ts):%d.%m.%Y} ({int((now - ts) // 86400)} Tage)"
+
+
 def _ensure_schema(db_path=DATABASE_FILE):
     """Idempotent in-place upgrade for an already-populated DB from an earlier
     version -- network.sqlite3.sql is the source of truth for fresh installs
@@ -95,12 +101,15 @@ def _ensure_schema(db_path=DATABASE_FILE):
     conn = sqlite3.connect(db_path)
     for stmt in (
         "ALTER TABLE nodes ADD COLUMN public_key TEXT",
+        "ALTER TABLE nodes ADD COLUMN first_seen INTEGER",
         "ALTER TABLE packets ADD COLUMN hop_start INTEGER",
     ):
         try:
             conn.execute(stmt)
         except sqlite3.OperationalError:
             pass  # column already exists
+    # Real first sighting of pre-existing nodes is unknown; last seen is the best lower bound.
+    conn.execute("UPDATE nodes SET first_seen = seen WHERE first_seen IS NULL")
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS "link_history" (
@@ -388,6 +397,9 @@ def statistics(hourly=False):
                 .dt.tz_convert(LOCAL_TIMEZONE)
             )
             issues = mesh_issues.analyze(database)
+            first_seen = dict(
+                cur.execute("SELECT id, first_seen FROM nodes WHERE first_seen IS NOT NULL")
+            )
 
         # Set global plot parameters
         plt.set_loglevel("WARNING")
@@ -510,6 +522,24 @@ def statistics(hourly=False):
             plt.savefig(os.getcwd() + "/web/snr.png", dpi=100, bbox_inches="tight")
             plt.close()
 
+        # Create node age distribution graph (long-term vs. short-lived nodes), all nodes in DB
+        now_ts = time.time()
+        ages = pd.Series([(now_ts - t) / 86400 for t in first_seen.values()])
+        if not ages.empty:
+            buckets = pd.cut(
+                ages,
+                [-1, 1, 7, 30, 90, float("inf")],
+                labels=["< 1 Tag", "< 1 Woche", "< 1 Monat", "< 3 Monate", "älter"],
+            ).value_counts(sort=False)
+            plt.figure(figsize=(8, 4))
+            age_plot = sns.barplot(x=buckets.index.astype(str), y=buckets.values, color=CHART_COLOR)
+            age_plot.bar_label(age_plot.containers[0])
+            age_plot.set_xlabel("Alter (seit erster Sichtung)")
+            age_plot.set_ylabel("Knoten")
+            age_plot.figure.suptitle("Altersverteilung der Knoten")
+            plt.savefig(os.getcwd() + "/web/node_age.png", dpi=100, bbox_inches="tight")
+            plt.close()
+
         # Create packet statistics graph for each node
         for node, node_packets in packets.groupby(["source", "longname"]):
             node_id = node[0]
@@ -532,6 +562,7 @@ def statistics(hourly=False):
                     packet_count=packet_count,
                     load=round(load, 3),
                     role=role,
+                    first_seen=_fmt_first_seen(first_seen.get(node_id), now_ts),
                 )
             )
             # Create single node statistics graph
@@ -740,7 +771,8 @@ def _upsert_node(
     with lock:
         cur = database.cursor()
         cur.executemany(
-            "INSERT INTO nodes VALUES(:id, :shortname, :longname, strftime('%s','now'), NULL, NULL, coalesce(:role, 0), coalesce(:hw, 0), :public_key) "
+            "INSERT INTO nodes (id, shortname, longname, seen, first_seen, latitude, longitude, role, hardware, public_key) "
+            "VALUES(:id, :shortname, :longname, strftime('%s','now'), strftime('%s','now'), NULL, NULL, coalesce(:role, 0), coalesce(:hw, 0), :public_key) "
             "ON CONFLICT(id) DO UPDATE SET shortname=coalesce(:shortname, shortname), "
             "longname=coalesce(:longname, longname), seen=strftime('%s','now'), "
             "role=coalesce(:role, role), hardware=coalesce(:hw, hardware), "
@@ -895,7 +927,8 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                 # silently drop it (unlike NODEINFO_APP/TRACEROUTE_APP, which both
                 # create the row via _upsert_node).
                 cur.executemany(
-                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), :lat, :lon, 0, 0, NULL) "
+                    "INSERT INTO nodes (id, shortname, longname, seen, first_seen, latitude, longitude, role, hardware, public_key) "
+                    "VALUES(:id, NULL, NULL, strftime('%s','now'), strftime('%s','now'), :lat, :lon, 0, 0, NULL) "
                     "ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now'), latitude=:lat, longitude=:lon;",
                     [{"id": from_id, "lat": lat, "lon": lon}],
                 )
@@ -929,7 +962,8 @@ def _handle_tcp_packet(database, lock, module_count, reader, packet):
                     [{"source": src, "destination": dst, "snr": snr, "trace_id": packet.get("id")}],
                 )
                 cur.executemany(
-                    "INSERT INTO nodes VALUES(:id, NULL, NULL, strftime('%s','now'), NULL, NULL, 0, 0, NULL) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
+                    "INSERT INTO nodes (id, shortname, longname, seen, first_seen, latitude, longitude, role, hardware, public_key) "
+                    "VALUES(:id, NULL, NULL, strftime('%s','now'), strftime('%s','now'), NULL, NULL, 0, 0, NULL) ON CONFLICT(id) DO UPDATE SET seen=strftime('%s','now');",
                     ({"id": src},),
                 )
             database.commit()

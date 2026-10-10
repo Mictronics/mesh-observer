@@ -26,7 +26,7 @@ def make_db():
             id INTEGER NOT NULL, shortname TEXT, longname TEXT, seen INTEGER,
             latitude REAL, longitude REAL,
             role INTEGER DEFAULT 0, hardware INTEGER DEFAULT 0,
-            public_key TEXT, PRIMARY KEY(id)
+            public_key TEXT, first_seen INTEGER, PRIMARY KEY(id)
         );
         CREATE TABLE packets (
             source INTEGER, type INTEGER, time INTEGER,
@@ -141,7 +141,7 @@ class TestHandleTcpPacket:
 
     def test_position_updates_lat_lon(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, NULL, NULL, 0, 0, NULL)", (1,))
+        db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (?, NULL, NULL, 0, NULL, NULL, 0, 0, NULL)", (1,))
         packet = {
             "from": 1,
             "decoded": {
@@ -168,7 +168,7 @@ class TestHandleTcpPacket:
 
     def test_zero_position_is_ignored(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, 12.0, 34.0, 0, 0, NULL)", (1,))
+        db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (?, NULL, NULL, 0, 12.0, 34.0, 0, 0, NULL)", (1,))
         packet = {
             "from": 1,
             "decoded": {"portnum": "POSITION_APP", "position": {"latitudeI": 0, "longitudeI": 0}},
@@ -207,7 +207,7 @@ class TestHandleTcpPacket:
 
     def test_own_node_position_and_telemetry_do_not_inflate_module_count(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (42, NULL, NULL, 0, NULL, NULL, 0, 0, NULL)")
+        db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (42, NULL, NULL, 0, NULL, NULL, 0, 0, NULL)")
         position_counts = handle(
             db,
             {"from": 42, "decoded": {"portnum": "POSITION_APP", "position": {"latitudeI": 500000000, "longitudeI": 100000000}}},
@@ -302,7 +302,7 @@ class TestHandleTcpPacket:
 
     def test_nodeinfo_key_change_logs_key_mismatch(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, 'AAAAAAAA')")
+        db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, 'AAAAAAAA')")
         packet = {"from": 1, "decoded": {"portnum": "NODEINFO_APP", "user": {"publicKey": "BBBBBBBB"}}}
         handle(db, packet)
         row = db.execute("SELECT kind, node_id FROM security_events").fetchone()
@@ -310,7 +310,7 @@ class TestHandleTcpPacket:
 
     def test_nodeinfo_same_key_does_not_log_mismatch(self):
         db = make_db()
-        db.execute("INSERT INTO nodes VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, 'AAAAAAAA')")
+        db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, 'AAAAAAAA')")
         packet = {"from": 1, "decoded": {"portnum": "NODEINFO_APP", "user": {"publicKey": "AAAAAAAA"}}}
         handle(db, packet)
         assert db.execute("SELECT count(*) FROM security_events").fetchone()[0] == 0
@@ -372,3 +372,11 @@ class TestHandleTcpPacket:
         }
         handle(db, packet, own_node_num=42)
         assert db.execute("SELECT count(*) FROM security_events").fetchone()[0] == 0
+
+
+def test_first_seen_set_once_and_not_overwritten():
+    db = make_db()
+    mo._upsert_node(db, threading.Lock(), 7, shortname="A")
+    db.execute("UPDATE nodes SET first_seen = 100 WHERE id = 7")
+    mo._upsert_node(db, threading.Lock(), 7, shortname="B")
+    assert db.execute("SELECT first_seen FROM nodes WHERE id = 7").fetchone()[0] == 100

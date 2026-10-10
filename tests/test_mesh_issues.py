@@ -17,7 +17,7 @@ def make_db():
             id INTEGER NOT NULL, shortname TEXT, longname TEXT, seen INTEGER,
             latitude REAL, longitude REAL,
             role INTEGER DEFAULT 0, hardware INTEGER DEFAULT 0,
-            public_key TEXT, PRIMARY KEY(id)
+            public_key TEXT, first_seen INTEGER, PRIMARY KEY(id)
         );
         CREATE TABLE packets (
             source INTEGER, type INTEGER, time INTEGER,
@@ -41,7 +41,7 @@ def make_db():
 def test_stale_nodes_flags_old_seen():
     db = make_db()
     db.execute(
-        "INSERT INTO nodes VALUES (1, NULL, 'Old', ?, NULL, NULL, 0, 0, NULL)", (int(time.time()) - 90000,)
+        "INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (1, NULL, 'Old', ?, NULL, NULL, 0, 0, NULL)", (int(time.time()) - 90000,)
     )
     findings = mesh_issues._stale_nodes(db.cursor(), {1: "Old"})
     assert [f["node_id"] for f in findings] == [1]
@@ -50,7 +50,7 @@ def test_stale_nodes_flags_old_seen():
 def test_stale_nodes_ignores_nodes_unseen_beyond_max_window():
     db = make_db()
     db.execute(
-        "INSERT INTO nodes VALUES (1, NULL, 'Ancient', ?, NULL, NULL, 0, 0, NULL)",
+        "INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (1, NULL, 'Ancient', ?, NULL, NULL, 0, 0, NULL)",
         (int(time.time()) - mesh_issues.STALE_NODE_MAX_SECONDS - 3600,),
     )
     findings = mesh_issues._stale_nodes(db.cursor(), {1: "Ancient"})
@@ -68,7 +68,7 @@ def test_chatty_nodes_flags_high_airtime():
 def test_congested_area_flags_dense_high_util_bin():
     db = make_db()
     for node_id in (1, 2, 3):
-        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, 48.0, 10.0, 0, 0, NULL)", (node_id,))
+        db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (?, NULL, NULL, 0, 48.0, 10.0, 0, 0, NULL)", (node_id,))
         db.execute("INSERT INTO packets (source, channel_util) VALUES (?, 30.0)", (node_id,))
     findings = mesh_issues._congested_areas(db.cursor(), {1: "A", 2: "B", 3: "C"})
     assert len(findings) == 1
@@ -77,7 +77,7 @@ def test_congested_area_flags_dense_high_util_bin():
 def test_router_cluster_flags_mutually_adjacent_routers():
     db = make_db()
     for node_id in (1, 2):
-        db.execute("INSERT INTO nodes VALUES (?, NULL, NULL, 0, NULL, NULL, 2, 0, NULL)", (node_id,))
+        db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (?, NULL, NULL, 0, NULL, NULL, 2, 0, NULL)", (node_id,))
     db.execute("INSERT INTO link_history (source, destination, snr, trace_id, seen) VALUES (1, 2, 5.0, 1, 0)")
     cur = db.cursor()
     node_info = mesh_issues._load_node_info(cur)
@@ -115,7 +115,7 @@ def test_hop_horizon_flags_exhausted_budget():
 
 def test_coverage_shadow_flags_never_heard_directly():
     db = make_db()
-    db.execute("INSERT INTO nodes VALUES (1, NULL, NULL, 0, 48.0, 10.0, 0, 0, NULL)")
+    db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (1, NULL, NULL, 0, 48.0, 10.0, 0, 0, NULL)")
     for _ in range(3):
         db.execute("INSERT INTO packets (source, hops_used) VALUES (1, 2)")
     findings = mesh_issues._coverage_shadow(db.cursor(), {1: "A"})
@@ -124,8 +124,8 @@ def test_coverage_shadow_flags_never_heard_directly():
 
 def test_duplicate_keys_flags_shared_key():
     db = make_db()
-    db.execute("INSERT INTO nodes VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, 'KEY')")
-    db.execute("INSERT INTO nodes VALUES (2, NULL, NULL, 0, NULL, NULL, 0, 0, 'KEY')")
+    db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, 'KEY')")
+    db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (2, NULL, NULL, 0, NULL, NULL, 0, 0, 'KEY')")
     findings = mesh_issues._duplicate_keys(db.cursor(), {1: "A", 2: "B"})
     assert len(findings) == 1
 
@@ -134,7 +134,7 @@ def test_low_entropy_key_flags_blacklisted_hash():
     raw = bytes([1]) * 32  # meshmonitor's documented dev/test key
     assert hashlib.sha256(raw).hexdigest() in mesh_issues.LOW_ENTROPY_KEY_HASHES
     db = make_db()
-    db.execute("INSERT INTO nodes VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, ?)", (base64.b64encode(raw).decode(),))
+    db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (1, NULL, NULL, 0, NULL, NULL, 0, 0, ?)", (base64.b64encode(raw).decode(),))
     findings = mesh_issues._low_entropy_keys(db.cursor(), {1: "A"})
     assert [f["node_id"] for f in findings] == [1]
 
@@ -167,9 +167,9 @@ def test_excessive_packet_rate_flags_high_volume():
 def test_analyze_combines_and_sorts_critical_first():
     db = make_db()
     now = int(time.time())
-    db.execute("INSERT INTO nodes VALUES (1, NULL, NULL, ?, NULL, NULL, 0, 0, NULL)", (now - 90000,))  # stale (info)
-    db.execute("INSERT INTO nodes VALUES (2, NULL, NULL, ?, NULL, NULL, 0, 0, 'KEY')", (now,))  # duplicate (critical)
-    db.execute("INSERT INTO nodes VALUES (3, NULL, NULL, ?, NULL, NULL, 0, 0, 'KEY')", (now,))
+    db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (1, NULL, NULL, ?, NULL, NULL, 0, 0, NULL)", (now - 90000,))  # stale (info)
+    db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (2, NULL, NULL, ?, NULL, NULL, 0, 0, 'KEY')", (now,))  # duplicate (critical)
+    db.execute("INSERT INTO nodes (id, shortname, longname, seen, latitude, longitude, role, hardware, public_key) VALUES (3, NULL, NULL, ?, NULL, NULL, 0, 0, 'KEY')", (now,))
     db.commit()
     findings = mesh_issues.analyze(db)
     assert findings[0]["severity"] == "critical"

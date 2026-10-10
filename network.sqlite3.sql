@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS "nodes" (
 	"role"	INTEGER DEFAULT 0,
 	"hardware"	INTEGER DEFAULT 0,
 	"public_key"	TEXT,
+	"first_seen"	INTEGER,
 	PRIMARY KEY("id")
 );
 CREATE TABLE IF NOT EXISTS "packet_types" (
