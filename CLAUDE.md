@@ -50,6 +50,10 @@ python3 meshtastic_observer.py --version
 
 (`-g`/`-s` also have long forms `--graph`/`--stats`.)
 
+Smoke-testing `statistics()` without touching the real DB/`web/`: copy `network.sqlite3` +
+`index.html.j2` into a scratch dir with an empty `web/images/`, `cd` there, set
+`g.lock = threading.Lock()`, then call `statistics()` (paths are cwd-relative).
+
 Create `tcp_credentials.py` (gitignored, not present in repo) exporting `__hostname__`/`__port__`
 (the node's TCP API) and `__repeater_tcp_port__`/`__repeater_http_port__` (the ports this app's own
 repeater binds to) -- see README.md for the exact template.
@@ -75,7 +79,7 @@ Everything runs from **`meshtastic_observer.py`**, launched as two daemon thread
   `meshtastic` Python library's pypubsub topic `"meshtastic.receive"` (which, thanks to pypubsub's
   topic hierarchy, catches every packet type regardless of sub-topic), and for each decoded packet
   calls `_handle_tcp_packet()` to write into `network.sqlite3` (`nodes`, `links`, `packets` tables)
-  and increments the in-memory `Globals.module_count` counters used for packets-per-hour
+  and increments the in-memory `g.module_count` counters used for packets-per-hour
   statistics. Note that the port-number-to-string mapping (`decoded["portnum"]`) and telemetry
   sub-type discrimination (`_classify_telemetry()`, keyed on which oneof field -- `deviceMetrics`,
   `environmentMetrics`, etc. -- is present in the decoded `Telemetry` message) now come straight
@@ -153,16 +157,17 @@ proxy answers those requests itself (404/405) instead of forwarding them, which 
 browser console as connect failures that look CORS-related but aren't (`http_repeater.py` already
 sets the right CORS headers).
 
-**Shared state**: `globals.py`'s `Globals` is a singleton holding cross-thread state that would
-otherwise need to be threaded through every function -- the argparse parser/args, the active
+**Shared state**: `globals.py` (imported as `g`) holds cross-thread state as plain module
+attributes (a module is already a singleton) -- the argparse parser/args, the active
 reader instance, the `threading.Lock` guarding all SQLite writes, the `threading.Event` used to
 stop threads, and the `module_count` dict (per-packet-type counters plus decode/encrypt/error
 counts, reset every 24h). All SQLite access -- from any thread, including the one-shot `-g`/`-s`
-invocations -- must hold `Globals.getInstance().getLock()`.
+invocations -- must hold `g.lock`.
 
 **Database** (`network.sqlite3`, schema in `network.sqlite3.sql`) -- unchanged by the TCP/repeater
 rework:
-- `nodes` -- one row per known node ID, with names, last-seen timestamp, position, role, hardware.
+- `nodes` -- one row per known node ID, with names, last-seen (`seen`) and first-seen
+  (`first_seen`, set once on insert, never overwritten) timestamps, position, role, hardware.
 - `links` -- directed edges between node IDs seen in traceroute output, with SNR; a trigger
   auto-deletes rows older than 24h on every insert. Traceroute now writes the full hop-by-hop chain
   (real node numbers from the decoded `RouteDiscovery`, not just the two endpoints), since the TCP
@@ -175,6 +180,11 @@ rework:
   invented to disambiguate the different telemetry sub-types that all arrive on port 67).
 - `ViewPackets` -- join of the above three, used as the single source for the stats/plotting code
   in `statistics()`.
+
+**Schema changes touch four places**: `network.sqlite3.sql` (fresh installs), the `ALTER TABLE`
+list in `_ensure_schema()` (runs on every start, upgrades live DBs in place), and the hand-written
+`CREATE TABLE` in `make_db()` of both test files. Always use named columns in `INSERT INTO nodes
+(...)` -- positional inserts break when a column is added.
 
 **Web output** (`web/` -- mostly gitignored, regenerated on each run): `meshtastic_observer.py`'s
 `statistics()` builds several matplotlib/seaborn charts (`stats.png`, `decoding.png`,
